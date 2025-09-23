@@ -398,7 +398,7 @@ except Exception as e:
     st.error(f"พรีวิวผิดพลาด: {e}")
 
 st.divider()
-st.subheader("📦 ส่งออก PDF ทั้งชุด (ปกหน้าแรก 1 ครั้ง + Body 1 หน้า/คน)")
+st.subheader("📦 ส่งออก PDF ทั้งชุด")
 
 if st.button("🚀 Export PDF"):
     try:
@@ -460,4 +460,4 @@ if st.button("🚀 Export PDF"):
         st.error(f"ส่งออกไม่สำเร็จ: {e}")
 
 st.markdown("---")
-st.caption("รับ CSV เดียวคอลัมน์: No, Student ID, Name, Semester 1, Semester 2, Total, Rating, Grade, Year • Preset รวม Body/Cover (บันทึก data_row_index=0) • รองรับไฟล์ PDF เท่านั้น • ใช้ use_container_width เสมอ")
+# st.caption("รับ CSV เดียวคอลัมน์: No, Student ID, Name, Semester 1, Semester 2, Total, Rating, Grade, Year • Preset รวม Body/Cover (บันทึก data_row_index=0) • รองรับไฟล์ PDF เท่านั้น • ใช้ use_container_width เสมอ")
