@@ -298,7 +298,7 @@ with c1:
     if body_source == "uploaded":
         st.success("Body Template: ใช้ไฟล์ที่อัปโหลด")
     elif body_source == "github":
-        st.info(f"Template: โหลดจาก อัตโนมัติ}")
+        st.info(f"Template: โหลดจาก อัตโนมัติ")
     else:
         st.error("Body Template: ไม่พบทั้งไฟล์อัปโหลดและค่าเริ่มต้นจาก GitHub")
 with c2:
