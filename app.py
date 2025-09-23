@@ -9,6 +9,8 @@
 #   ✅ Preset รวมไฟล์เดียว (Body + Cover) — บันทึก data_row_index=0 เสมอ
 #   ✅ พรีวิวสด — ใช้ use_container_width
 #   ✅ CSV Auto-load จาก GitHub (เหมือน Body/Cover) + แสดงสถานะ
+#   ✅ Preset (.json) Auto-load จาก GitHub แบบเดียวกับ Body/Cover/CSV + สถานะ
+#   ✅ รองรับการจัดตำแหน่ง Align (left/center/right) ด้วยการคำนวณความกว้างข้อความ
 #
 # Install deps:
 #   pip install streamlit pandas pillow pymupdf requests
@@ -33,9 +35,9 @@ from PIL import Image  # used to render pixmap previews
 # ------------------ Default URLs ------------------
 DEFAULT_COVER_URL = "https://github.com/firstnattapon/Canva/blob/main/Cover.pdf"
 DEFAULT_BODY_URL  = "https://github.com/firstnattapon/Canva/blob/main/Template.pdf"
-DEFAULT_PRESET_URL = "https://raw.githubusercontent.com/firstnattapon/Canva/refs/heads/main/layout_preset.json"
-# ✅ NEW: Default CSV (auto GitHub)
-DEFAULT_CSV_URL = "https://raw.githubusercontent.com/firstnattapon/Canva/refs/heads/main/Data.csv"
+# ✅ ใช้ลิงก์หน้าเว็บก็ได้ เดี๋ยวแปลงเป็น raw ให้อัตโนมัติ
+DEFAULT_PRESET_URL = "https://github.com/firstnattapon/Canva/blob/main/layout_preset.json"
+DEFAULT_CSV_URL = "https://github.com/firstnattapon/Canva/blob/main/Data.csv"
 
 # ------------------ Canonical columns & defaults ------------------
 CANONICAL_COLS = {
@@ -94,7 +96,6 @@ def to_raw_github(url: str) -> str:
         return url.replace("github.com/", "raw.githubusercontent.com/").replace("/blob/", "/")
     return url
 
-
 @st.cache_data(show_spinner=False, ttl=3600)
 def fetch_default_pdf(url: str) -> Optional[bytes]:
     try:
@@ -106,17 +107,17 @@ def fetch_default_pdf(url: str) -> Optional[bytes]:
         st.warning(f"โหลดค่าเริ่มต้นจาก {url} ไม่ได้: {e}")
         return None
 
-
 @st.cache_data(show_spinner=False, ttl=3600)
 def fetch_default_json(url: str) -> Optional[bytes]:
+    """Fetch JSON bytes from GitHub (supports normal or raw URLs)."""
     try:
-        resp = requests.get(url, timeout=10)
+        raw_url = to_raw_github(url)
+        resp = requests.get(raw_url, timeout=10)
         resp.raise_for_status()
         return resp.content
     except Exception as e:
         st.warning(f"โหลด Preset จาก {url} ไม่ได้: {e}")
         return None
-
 
 @st.cache_data(show_spinner=False, ttl=3600)
 def fetch_default_csv(url: str) -> Optional[bytes]:
@@ -130,17 +131,14 @@ def fetch_default_csv(url: str) -> Optional[bytes]:
         st.warning(f"โหลด CSV เริ่มต้นจาก {url} ไม่ได้: {e}")
         return None
 
-
 def read_csv_bytes(b: bytes) -> pd.DataFrame:
     """Read CSV bytes into DataFrame with BOM fallback + header trim."""
     try:
         df = pd.read_csv(io.BytesIO(b))
     except UnicodeDecodeError:
         df = pd.read_csv(io.BytesIO(b), encoding="utf-8-sig")
-    # Normalize header whitespace
     df = df.rename(columns=lambda c: " ".join(str(c).split()))
     return df
-
 
 def try_read_table(uploaded_file) -> pd.DataFrame:
     """Read CSV/Excel into DataFrame and normalize header whitespace."""
@@ -159,13 +157,11 @@ def try_read_table(uploaded_file) -> pd.DataFrame:
         else:
             st.warning(f"ไม่รองรับไฟล์: {uploaded_file.name}")
             return pd.DataFrame()
-        # Normalize header whitespace e.g. ' Total  ' -> 'Total'
         df = df.rename(columns=lambda c: " ".join(str(c).split()))
     except Exception as e:
         st.error(f"อ่านไฟล์ {uploaded_file.name} ไม่ได้: {e}")
         return pd.DataFrame()
     return df
-
 
 def canonicalize_columns(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
@@ -199,7 +195,6 @@ def canonicalize_columns(df: pd.DataFrame) -> pd.DataFrame:
     out = df.rename(columns=new_cols)
     return out
 
-
 def build_field_df(existing_cols: List[str], defaults) -> pd.DataFrame:
     rows = []
     existing = set(existing_cols)
@@ -225,7 +220,6 @@ def build_field_df(existing_cols: List[str], defaults) -> pd.DataFrame:
     df = pd.DataFrame(rows)
     return df
 
-
 def apply_transform(text, mode: str) -> str:
     if text is None or (isinstance(text, float) and pd.isna(text)):
         return ""
@@ -238,7 +232,6 @@ def apply_transform(text, mode: str) -> str:
         return s.title()
     return s
 
-
 def get_record_display(rec: pd.Series, key_cols=("student_id", "name")) -> str:
     parts = []
     for k in key_cols:
@@ -246,6 +239,17 @@ def get_record_display(rec: pd.Series, key_cols=("student_id", "name")) -> str:
             parts.append(str(rec[k]))
     return " • ".join(parts) if parts else "(no id / name)"
 
+def _aligned_xy(page, text: str, x: float, y: float, font: str, size: float, align: str):
+    """Return (x_adj, y) after applying align using text width."""
+    try:
+        width = page.get_text_length(text, fontname=font if font in STD_FONTS else "helv", fontsize=size)
+    except Exception:
+        width = page.get_text_length(text, fontname="helv", fontsize=size)
+    if align == "center":
+        return x - width / 2.0, y
+    if align == "right":
+        return x - width, y
+    return x, y
 
 def render_preview_with_pymupdf(template_bytes: bytes, fields_df: pd.DataFrame,
                                 record: pd.Series, scale: float = 2.0):
@@ -265,14 +269,16 @@ def render_preview_with_pymupdf(template_bytes: bytes, fields_df: pd.DataFrame,
         if key not in record or pd.isna(record[key]):
             continue
         text = apply_transform(record[key], row["transform"])
-        x, y = float(row["x"]), float(row["y"]) 
+        x, y = float(row["x"]), float(row["y"])
         font = row.get("font", "helv")
         size = float(row.get("size", 12))
+        align = row.get("align", "left")
+        ax, ay = _aligned_xy(p, str(text), x, y, font, size, align)
         try:
-            p.insert_text((x, y), str(text), fontname=font if font in STD_FONTS else "helv",
+            p.insert_text((ax, ay), str(text), fontname=font if font in STD_FONTS else "helv",
                           fontsize=size, color=(0, 0, 0))
         except Exception:
-            p.insert_text((x, y), str(text), fontname="helv", fontsize=size, color=(0, 0, 0))
+            p.insert_text((ax, ay), str(text), fontname="helv", fontsize=size, color=(0, 0, 0))
 
     mat = fitz.Matrix(scale, scale)
     pix = p.get_pixmap(matrix=mat, alpha=False)
@@ -280,12 +286,10 @@ def render_preview_with_pymupdf(template_bytes: bytes, fields_df: pd.DataFrame,
     td.close(); newdoc.close()
     return img
 
-
 # ------------------ Streamlit UI ------------------
 
 st.set_page_config(page_title="PDF Layout Editor — CSV (Unified) → Batch PDF [PDF-only]", layout="wide")
 st.title("🖨️ PDF Layout Editor")
-# st.caption("Cover ใช้ข้อมูลชุดเดียวกับ Body แต่มี Layout แยก • ปกอยู่หน้าแรก 1 ครั้ง • Preset .json รวม Body/Cover • รองรับ **PDF เท่านั้น** • ปกใช้ข้อมูล \"แถว 0\" เสมอ • ถ้าไม่อัปโหลดจะโหลดค่าเริ่มต้นจาก GitHub อัตโนมัติ")
 
 if fitz is None:
     st.error("ต้องติดตั้ง PyMuPDF ก่อนใช้งาน: `pip install pymupdf`")
@@ -307,11 +311,13 @@ with st.sidebar:
 # Auto-fetch defaults if not uploaded
 default_body_bytes = None
 default_cover_bytes = None
-default_csv_bytes = None  # ✅ NEW
+default_csv_bytes = None
+default_preset_bytes = None  # ✅ NEW
 
-body_source = "uploaded" if tpl_pdf is not None else "github"  # tentative
-cover_source = "uploaded" if tpl_cover_pdf is not None else "github"  # tentative
-csv_source = "uploaded" if csv_main is not None else "github"  # ✅ NEW
+body_source = "uploaded" if tpl_pdf is not None else "github"
+cover_source = "uploaded" if tpl_cover_pdf is not None else "github"
+csv_source = "uploaded" if csv_main is not None else "github"
+preset_source = "github"  # จะอัปเดตตามการกระทำด้านล่าง
 
 if tpl_pdf is None:
     default_body_bytes = fetch_default_pdf(DEFAULT_BODY_URL)
@@ -321,7 +327,6 @@ if cover_active and tpl_cover_pdf is None:
     default_cover_bytes = fetch_default_pdf(DEFAULT_COVER_URL)
     if default_cover_bytes is None:
         cover_source = "missing"
-# ✅ NEW: CSV auto-load when not uploaded
 if csv_main is None:
     default_csv_bytes = fetch_default_csv(DEFAULT_CSV_URL)
     if default_csv_bytes is None:
@@ -348,7 +353,7 @@ with c2:
         else:
             st.error("Cover Template: ไม่พบทั้งไฟล์อัปโหลดและค่าเริ่มต้นจาก GitHub")
 
-# ✅ NEW: CSV status
+# CSV status
 st.subheader("🔔 สถานะข้อมูล (CSV)")
 if csv_source == "uploaded":
     st.success("CSV: ใช้ไฟล์ที่อัปโหลด")
@@ -365,7 +370,7 @@ with colL:
         if default_csv_bytes is not None:
             df = canonicalize_columns(read_csv_bytes(default_csv_bytes))
         else:
-            st.warning("อัปโหลด CSV ตามสคีมาใหม่ก่อน หรือให้ระบบโหลดจาก GitHub ไม่สำเร็จ")
+            st.warning("อัปโหลด CSV ตามสคีมาใหม่ก่อน หรือระบบโหลดจาก GitHub ไม่สำเร็จ")
             st.stop()
 
     if df.empty:
@@ -395,15 +400,17 @@ with colR:
         st.session_state["cover_fields_df"] = build_field_df(active_df.columns.tolist(), DEFAULT_COVER_FIELDS)
     if "preset_loaded" not in st.session_state:
         st.session_state["preset_loaded"] = False
+    if "preset_url_used" not in st.session_state:
+        st.session_state["preset_url_used"] = ""
 
     with st.expander("Import / Export", expanded=False):
         col_i, col_e = st.columns(2)
         with col_i:
             preset_json = st.file_uploader("นำเข้า Preset (.json)", type=["json"], key="unified_preset_upload")
-            preset_url = st.text_input("หรือระบุ URL (raw GitHub) สำหรับ Preset", value=DEFAULT_PRESET_URL)
+            preset_url = st.text_input("หรือระบุ URL (GitHub/Raw) สำหรับ Preset", value=DEFAULT_PRESET_URL)
             load_from_url = st.button("⬇️ โหลด Preset จาก URL")
 
-            def _apply_unified_preset_bytes(preset_bytes: bytes):
+            def _apply_unified_preset_bytes(preset_bytes: bytes, source_label: str):
                 try:
                     raw = json.loads(preset_bytes.decode("utf-8"))
                     # Back-compat: list/fields => Body only
@@ -417,6 +424,7 @@ with colR:
                             return
                         st.session_state["fields_df"] = new_df[req]
                         st.session_state["preset_loaded"] = True
+                        st.session_state["preset_url_used"] = source_label
                         st.info("โหลดเฉพาะ Body (legacy) จาก Preset แล้ว")
                     else:
                         body = raw.get("body", {})
@@ -427,24 +435,28 @@ with colR:
                             st.session_state["cover_fields_df"] = pd.DataFrame(cover["fields"])
                         # data_row_index ถูกบังคับเป็น 0 เสมอ
                         st.session_state["preset_loaded"] = True
+                        st.session_state["preset_url_used"] = source_label
                         st.success("นำเข้า Preset (Body + Cover) สำเร็จ")
                 except Exception as e:
                     st.error(f"อ่านไฟล์/URL Preset ไม่ได้: {e}")
 
             if preset_json is not None:
-                _apply_unified_preset_bytes(preset_json.read())
+                _apply_unified_preset_bytes(preset_json.read(), "uploaded")
+                preset_source = "uploaded"
 
             if load_from_url:
                 b = fetch_default_json(preset_url)
                 if b:
-                    _apply_unified_preset_bytes(b)
+                    _apply_unified_preset_bytes(b, to_raw_github(preset_url))
+                    preset_source = "github"
 
             # Auto-load from DEFAULT_PRESET_URL once if nothing uploaded yet
             if not st.session_state["preset_loaded"] and preset_json is None and not load_from_url:
                 auto_b = fetch_default_json(DEFAULT_PRESET_URL)
                 if auto_b:
-                    _apply_unified_preset_bytes(auto_b)
-                    st.info(f"Preset: โหลดจาก GitHub อัตโนมัติ\n{DEFAULT_PRESET_URL}")
+                    _apply_unified_preset_bytes(auto_b, to_raw_github(DEFAULT_PRESET_URL))
+                    st.info(f"Preset: โหลดจาก GitHub อัตโนมัติ\n{to_raw_github(DEFAULT_PRESET_URL)}")
+                    preset_source = "github"
 
         with col_e:
             try:
@@ -461,6 +473,16 @@ with colR:
                                    file_name="layout_preset_body_cover.json", mime="application/json")
             except Exception as e:
                 st.error(f"Export JSON ผิดพลาด: {e}")
+
+    # ✅ แสดงสถานะ Preset เหมือน Body/Cover/CSV
+    st.subheader("🔔 สถานะ Preset (.json)")
+    if preset_source == "uploaded":
+        st.success("Preset: ใช้ไฟล์ที่อัปโหลด")
+    elif preset_source == "github":
+        used = st.session_state.get("preset_url_used", to_raw_github(DEFAULT_PRESET_URL))
+        st.info(f"Preset: โหลดจาก GitHub อัตโนมัติ\n{used}")
+    else:
+        st.error("Preset: ไม่พบทั้งไฟล์อัปโหลดและค่าเริ่มต้นจาก GitHub")
 
     # Tabs for editing
     tab_body, tab_cover = st.tabs(["⚙️ Body Layout", "⚙️ Cover Layout"])
@@ -518,6 +540,25 @@ record_cover = active_df.iloc[cov_idx]
 
 page_type = st.radio("หน้าไหน", ["Body", "Cover"], index=0, horizontal=True)
 
+def _draw_fields_on_page(page, fields_df: pd.DataFrame, record: pd.Series):
+    for _, row in fields_df.iterrows():
+        if not row["active"]:
+            continue
+        key = row["field_key"]
+        if key not in record or pd.isna(record[key]):
+            continue
+        text = apply_transform(record[key], row["transform"])
+        x, y = float(row["x"]), float(row["y"])
+        font = row.get("font", "helv")
+        size = float(row.get("size", 12))
+        align = row.get("align", "left")
+        ax, ay = _aligned_xy(page, str(text), x, y, font, size, align)
+        try:
+            page.insert_text((ax, ay), str(text), fontname=font if font in STD_FONTS else "helv",
+                             fontsize=size, color=(0,0,0))
+        except Exception:
+            page.insert_text((ax, ay), str(text), fontname="helv", fontsize=size, color=(0,0,0))
+
 try:
     if page_type == "Body":
         body_src = tpl_pdf.getvalue() if tpl_pdf is not None else default_body_bytes
@@ -569,21 +610,7 @@ if st.button("🚀 Export PDF"):
                     t_cover = fitz.open(stream=cover_src, filetype="pdf")
                     out.insert_pdf(t_cover, from_page=0, to_page=0)
                     page0 = out[-1]
-                    # Overlay cover fields with row 0
-                    for _, row in st.session_state["cover_fields_df"].iterrows():
-                        if not row["active"]:
-                            continue
-                        key = row["field_key"]
-                        if key not in record_cover or pd.isna(record_cover[key]):
-                            continue
-                        text = apply_transform(record_cover[key], row["transform"])
-                        x, y = float(row["x"]), float(row["y"]) 
-                        font = row.get("font", "helv"); size = float(row.get("size", 12))
-                        try:
-                            page0.insert_text((x, y), str(text), fontname=font if font in STD_FONTS else "helv",
-                                              fontsize=size, color=(0,0,0))
-                        except Exception:
-                            page0.insert_text((x, y), str(text), fontname="helv", fontsize=size, color=(0,0,0))
+                    _draw_fields_on_page(page0, st.session_state["cover_fields_df"], record_cover)
                     t_cover.close()
                 else:
                     st.warning("ไม่พบ Cover Template — จะข้ามหน้า Cover")
@@ -593,20 +620,7 @@ if st.button("🚀 Export PDF"):
                 t_body = fitz.open(stream=body_src, filetype="pdf")
                 out.insert_pdf(t_body, from_page=0, to_page=0)
                 page = out[-1]
-                for _, row in st.session_state["fields_df"].iterrows():
-                    if not row["active"]:
-                        continue
-                    key = row["field_key"]
-                    if key not in rec or pd.isna(rec[key]):
-                        continue
-                    text = apply_transform(rec[key], row["transform"])
-                    x, y = float(row["x"]), float(row["y"]) 
-                    font = row.get("font", "helv"); size = float(row.get("size", 12))
-                    try:
-                        page.insert_text((x, y), str(text), fontname=font if font in STD_FONTS else "helv",
-                                         fontsize=size, color=(0,0,0))
-                    except Exception:
-                        page.insert_text((x, y), str(text), fontname="helv", fontsize=size, color=(0,0,0))
+                _draw_fields_on_page(page, st.session_state["fields_df"], rec)
                 t_body.close()
 
             pdf_bytes = out.tobytes(); out.close()
@@ -618,4 +632,8 @@ if st.button("🚀 Export PDF"):
         st.error(f"ส่งออกไม่สำเร็จ: {e}")
 
 st.markdown("---")
-st.caption("CSV: No, Student ID, Name, Semester 1, Semester 2, Total, Rating, Grade, Year • Preset รวม (data_row_index=0) • ใช้ PDF เท่านั้น • มีโหมดโหลดจาก GitHub อัตโนมัติ (Template + Preset + CSV)")
+st.caption(
+    "CSV: No, Student ID, Name, Semester 1, Semester 2, Total, Rating, Grade, Year • "
+    "Preset รวม (data_row_index=0) • ใช้ PDF เท่านั้น • "
+    "โหลดอัตโนมัติจาก GitHub ได้ทั้ง Template + Preset + CSV (รองรับลิงก์หน้าเว็บ GitHub และ raw)"
+)
