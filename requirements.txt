@@ -6,3 +6,4 @@ pypdf
 pillow
 fitz
 frontend
+pymupdf==1.24.10
