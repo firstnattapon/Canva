@@ -386,7 +386,7 @@ with colL:
     st.dataframe(active_df.head(12), use_container_width=True)
 
 with colR:
-    st.subheader("🧩 Preset (.json) — รวม Body + Cover (cover ใช้แถว 0 เสมอ)")
+    st.subheader("🧩 Preset (.json)")
 
     # Init session states
     if "fields_df" not in st.session_state:
