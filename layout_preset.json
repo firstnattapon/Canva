@@ -3,8 +3,8 @@
   "body": {
     "fields": [
       {
-        "field_key": "no",
-        "label": "No",
+        "field_key": "No",
+        "label": "no",
         "active": true,
         "x": 200.0,
         "y": 160.0,
