@@ -1,15 +1,13 @@
 # -*- coding: utf-8 -*-
 # =============================================================
 # Streamlit App: PDF Template Overlay + CSV -> Batch PDF Export (PDF-only)
-# Spec update:
-#   ✅ CSV เดียว: No, Student ID, Name, Semester 1, Semester 2, Total, Rating, Grade, Year
-#   ✅ Template เฉพาะ PDF เท่านั้น (ไม่มีอัปโหลดรูป)
-#   ✅ Cover ใช้ข้อมูล "แถวที่ 0 เสมอ" (บังคับ)
-#   ✅ Preset (.json) รวมไฟล์เดียว (Body + Cover) — บันทึก data_row_index=0 เสมอ
-#   ✅ พรีวิวสด (Body/Cover) — ใช้ use_container_width
-#   ✅ ถ้าไม่อัปโหลดเทมเพลต จะโหลดค่าเริ่มต้นจาก GitHub อัตโนมัติ:
-#         Cover:  https://github.com/firstnattapon/Canva/blob/main/Cover.pdf
-#         Body:   https://github.com/firstnattapon/Canva/blob/main/Template.pdf
+# Update:
+#   ✅ แสดงสถานะชัดเจนเมื่อโหลดเทมเพลตจาก GitHub อัตโนมัติ (Body/Cover)
+#   ✅ นำเข้า Preset (.json) จาก GitHub (raw) อัตโนมัติถ้าไม่อัปโหลด พร้อม URL ให้แก้ได้
+#   ✅ CSV เดียว (No, Student ID, Name, Semester 1, Semester 2, Total, Rating, Grade, Year)
+#   ✅ Cover ใช้ข้อมูล "แถว 0 เสมอ"
+#   ✅ Preset รวมไฟล์เดียว (Body + Cover) — บันทึก data_row_index=0 เสมอ
+#   ✅ พรีวิวสด — ใช้ use_container_width
 #
 # Install deps:
 #   pip install streamlit pandas pillow pymupdf requests
@@ -34,7 +32,7 @@ from PIL import Image  # used to render pixmap previews
 # ------------------ Default URLs ------------------
 DEFAULT_COVER_URL = "https://github.com/firstnattapon/Canva/blob/main/Cover.pdf"
 DEFAULT_BODY_URL  = "https://github.com/firstnattapon/Canva/blob/main/Template.pdf"
-
+DEFAULT_PRESET_URL = "https://raw.githubusercontent.com/firstnattapon/Canva/refs/heads/main/layout_preset.json"
 
 # ------------------ Canonical columns & defaults ------------------
 CANONICAL_COLS = {
@@ -88,8 +86,7 @@ STD_FONTS = ["helv", "times", "cour"]  # Built-in fonts for PyMuPDF
 # ------------------ Helpers ------------------
 
 def to_raw_github(url: str) -> str:
-    # Transform GitHub web URL -> raw.githubusercontent URL
-    # e.g. https://github.com/user/repo/blob/branch/path -> https://raw.githubusercontent.com/user/repo/branch/path
+    """Transform GitHub web URL -> raw.githubusercontent URL when needed."""
     if "github.com/" in url and "/blob/" in url:
         return url.replace("github.com/", "raw.githubusercontent.com/").replace("/blob/", "/")
     return url
@@ -101,13 +98,20 @@ def fetch_default_pdf(url: str) -> Optional[bytes]:
         raw_url = to_raw_github(url)
         resp = requests.get(raw_url, timeout=10)
         resp.raise_for_status()
-        # Basic content-type sanity (but don't block if missing)
-        if "application/pdf" not in resp.headers.get("Content-Type", "") and not raw_url.lower().endswith(".pdf"):
-            # still return; PyMuPDF will error if not PDF
-            pass
         return resp.content
     except Exception as e:
         st.warning(f"โหลดค่าเริ่มต้นจาก {url} ไม่ได้: {e}")
+        return None
+
+
+@st.cache_data(show_spinner=False, ttl=3600)
+def fetch_default_json(url: str) -> Optional[bytes]:
+    try:
+        resp = requests.get(url, timeout=10)
+        resp.raise_for_status()
+        return resp.content
+    except Exception as e:
+        st.warning(f"โหลด Preset จาก {url} ไม่ได้: {e}")
         return None
 
 
@@ -267,7 +271,7 @@ with st.sidebar:
     tpl_pdf = st.file_uploader("Template PDF (Body)", type=["pdf"])
 
     st.header("🧾 เทมเพลต — ปก (PDF เท่านั้น)")
-    cover_active = st.checkbox("Active ปก (หน้าแรกเสมอ)", value=True)
+    cover_active = st.checkbox("Active ปก (หน้าแรกเสมอ; ไม่ต่อคน)", value=False)
     tpl_cover_pdf = st.file_uploader("Cover Template PDF", type=["pdf"])
 
     st.header("📥 ข้อมูล (CSV เดียว)")
@@ -276,10 +280,37 @@ with st.sidebar:
 # Auto-fetch defaults if not uploaded
 default_body_bytes = None
 default_cover_bytes = None
+body_source = "uploaded" if tpl_pdf is not None else "github"  # tentative
+cover_source = "uploaded" if tpl_cover_pdf is not None else "github"  # tentative
 if tpl_pdf is None:
     default_body_bytes = fetch_default_pdf(DEFAULT_BODY_URL)
+    if default_body_bytes is None:
+        body_source = "missing"
 if cover_active and tpl_cover_pdf is None:
     default_cover_bytes = fetch_default_pdf(DEFAULT_COVER_URL)
+    if default_cover_bytes is None:
+        cover_source = "missing"
+
+# Visible status for template sources
+st.subheader("🔔 สถานะเทมเพลต (Body/Cover)")
+c1, c2 = st.columns(2)
+with c1:
+    if body_source == "uploaded":
+        st.success("Body Template: ใช้ไฟล์ที่อัปโหลด")
+    elif body_source == "github":
+        st.info(f"Body Template: โหลดจาก GitHub อัตโนมัติ\n{to_raw_github(DEFAULT_BODY_URL)}")
+    else:
+        st.error("Body Template: ไม่พบทั้งไฟล์อัปโหลดและค่าเริ่มต้นจาก GitHub")
+with c2:
+    if not cover_active:
+        st.warning("Cover Template: ปิดการใช้งานปก (จะไม่มีหน้าแรก)")
+    else:
+        if cover_source == "uploaded":
+            st.success("Cover Template: ใช้ไฟล์ที่อัปโหลด")
+        elif cover_source == "github":
+            st.info(f"Cover Template: โหลดจาก GitHub อัตโนมัติ\n{to_raw_github(DEFAULT_COVER_URL)}")
+        else:
+            st.error("Cover Template: ไม่พบทั้งไฟล์อัปโหลดและค่าเริ่มต้นจาก GitHub")
 
 with colL:
     # Load data — single CSV
@@ -310,14 +341,19 @@ with colR:
         st.session_state["fields_df"] = build_field_df(active_df.columns.tolist(), DEFAULT_FIELDS)
     if "cover_fields_df" not in st.session_state:
         st.session_state["cover_fields_df"] = build_field_df(active_df.columns.tolist(), DEFAULT_COVER_FIELDS)
+    if "preset_loaded" not in st.session_state:
+        st.session_state["preset_loaded"] = False
 
     with st.expander("Import / Export", expanded=False):
         col_i, col_e = st.columns(2)
         with col_i:
             preset_json = st.file_uploader("นำเข้า Preset (.json)", type=["json"], key="unified_preset_upload")
-            if preset_json is not None:
+            preset_url = st.text_input("หรือระบุ URL (raw GitHub) สำหรับ Preset", value=DEFAULT_PRESET_URL)
+            load_from_url = st.button("⬇️ โหลด Preset จาก URL")
+
+            def _apply_unified_preset_bytes(preset_bytes: bytes):
                 try:
-                    raw = json.load(preset_json)
+                    raw = json.loads(preset_bytes.decode("utf-8"))
                     # Back-compat: list/fields => Body only
                     if isinstance(raw, list) or "fields" in raw:
                         fields_list = raw.get("fields", raw if isinstance(raw, list) else [])
@@ -325,9 +361,11 @@ with colR:
                         req = ["field_key", "label", "active", "x", "y", "font", "size", "transform", "align"]
                         missing = [c for c in req if c not in new_df.columns]
                         if missing:
-                            raise ValueError(f"ขาดคีย์ใน JSON: {missing}")
+                            st.error(f"Preset JSON ขาดคีย์: {missing}")
+                            return
                         st.session_state["fields_df"] = new_df[req]
-                        st.info("โหลดเฉพาะ Body (legacy) แล้ว")
+                        st.session_state["preset_loaded"] = True
+                        st.info("โหลดเฉพาะ Body (legacy) จาก Preset แล้ว")
                     else:
                         body = raw.get("body", {})
                         cover = raw.get("cover", {})
@@ -335,14 +373,31 @@ with colR:
                             st.session_state["fields_df"] = pd.DataFrame(body["fields"])
                         if "fields" in cover:
                             st.session_state["cover_fields_df"] = pd.DataFrame(cover["fields"])
-                        # data_row_index ถูกบังคับเป็น 0 เสมอในแอปนี้
-                        st.success("นำเข้า Preset (Body + Cover) สำเร็จ — ใช้แถว 0 สำหรับปกเสมอ")
+                        # data_row_index ถูกบังคับเป็น 0 เสมอ
+                        st.session_state["preset_loaded"] = True
+                        st.success("นำเข้า Preset (Body + Cover) สำเร็จ")
                 except Exception as e:
-                    st.error(f"อ่านไฟล์ JSON ไม่ได้: {e}")
+                    st.error(f"อ่านไฟล์/URL Preset ไม่ได้: {e}")
+
+            if preset_json is not None:
+                _apply_unified_preset_bytes(preset_json.read())
+
+            if load_from_url:
+                b = fetch_default_json(preset_url)
+                if b:
+                    _apply_unified_preset_bytes(b)
+
+            # Auto-load from DEFAULT_PRESET_URL once if nothing uploaded yet
+            if not st.session_state["preset_loaded"] and preset_json is None and not load_from_url:
+                auto_b = fetch_default_json(DEFAULT_PRESET_URL)
+                if auto_b:
+                    _apply_unified_preset_bytes(auto_b)
+                    st.info(f"Preset: โหลดจาก GitHub อัตโนมัติ\n{DEFAULT_PRESET_URL}")
+
         with col_e:
             try:
                 payload = {
-                    "version": 9,
+                    "version": 10,
                     "body": {"fields": st.session_state["fields_df"].to_dict(orient="records")},
                     "cover": {
                         "fields": st.session_state["cover_fields_df"].to_dict(orient="records"),
@@ -420,12 +475,12 @@ try:
                 caption=f"Body — {get_record_display(record_body)}",
                 use_container_width=True,
             )
+            if body_source == "github" and tpl_pdf is None:
+                st.caption(f"กำลังใช้ Body จาก GitHub: {to_raw_github(DEFAULT_BODY_URL)}")
             st.caption("Body: หน่วย X/Y = จุด (pt) — มุมซ้ายบนคือ (0,0)")
         else:
             st.info("อัปโหลด Template PDF ของ Body หรือให้ระบบโหลดค่าเริ่มต้นจาก GitHub (ตรวจสอบเครือข่าย)")
     else:  # Cover
-        if st.session_state.get("cover_toggle_cached", None) is None:
-            st.session_state["cover_toggle_cached"] = True  # noop placeholder
         if cover_active:
             cover_src = tpl_cover_pdf.getvalue() if tpl_cover_pdf is not None else default_cover_bytes
             if cover_src is not None:
@@ -434,6 +489,8 @@ try:
                     caption=f"Cover — ใช้ข้อมูลแถวที่ 0 (แถวแรก) — {get_record_display(record_cover)}",
                     use_container_width=True,
                 )
+                if cover_source == "github" and tpl_cover_pdf is None:
+                    st.caption(f"กำลังใช้ Cover จาก GitHub: {to_raw_github(DEFAULT_COVER_URL)}")
                 st.caption("Cover: หน่วย X/Y = จุด (pt) — มุมซ้ายบนคือ (0,0) • ใช้ข้อมูลจากแถวที่ 0 เสมอ")
             else:
                 st.info("เปิด Active ปก แล้ว—อัปโหลด Cover Template PDF หรือให้ระบบโหลดค่าเริ่มต้นจาก GitHub (ตรวจสอบเครือข่าย)")
@@ -509,4 +566,4 @@ if st.button("🚀 Export PDF"):
         st.error(f"ส่งออกไม่สำเร็จ: {e}")
 
 st.markdown("---")
-st.caption("รับ CSV เดียวคอลัมน์: No, Student ID, Name, Semester 1, Semester 2, Total, Rating, Grade, Year • Preset รวม Body/Cover (data_row_index=0) • รองรับไฟล์ PDF เท่านั้น • ถ้าไม่อัปโหลดจะโหลดเทมเพลตจาก GitHub อัตโนมัติ")
+st.caption("CSV: No, Student ID, Name, Semester 1, Semester 2, Total, Rating, Grade, Year • Preset รวม (data_row_index=0) • ใช้ PDF เท่านั้น • มีโหมดโหลดจาก GitHub อัตโนมัติ (Template + Preset) พร้อมบอกสถานะชัดเจน")
