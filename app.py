@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
 # =============================================================
 # Streamlit App: PDF Template Overlay + CSV -> Batch PDF Export
-# Spec (ตามคำสั่งล่าสุด):
-#   ✅ Cover (template) ใช้ "ข้อมูลเหมือนกับ Body" แต่ Layout แยกเป็นอีกชุด
+# Spec (ตามสคีมาใหม่ของไฟล์นำเข้า):
+#   ✅ ไฟล์ CSV เดียว มีคอลัมน์: No, Student ID, Name, Semester 1, Semester 2, Total, Rating, Grade, Year
+#   ✅ Cover (template) ใช้ข้อมูลชุดเดียวกับ Body แต่มี Layout แยก
 #   ✅ ปกอยู่หน้าแรกครั้งเดียว (ไม่ต่อคน)
-#   ✅ Presets (.json) รวมกันไฟล์เดียว (Body + Cover + cover_data_index)
+#   ✅ Presets (.json) รวมไฟล์เดียว (Body + Cover + cover_data_index)
 #   ✅ พรีวิวสด (Body/Cover) — ใช้ use_container_width
 #
 # Install deps:
@@ -34,30 +35,43 @@ CANONICAL_COLS = {
     "ID": "student_id",
     "Name - Surname": "name",
     "Name": "name",
-    "Idea": "idea",
-    "Pronunciation": "pronunciation",
-    "Preparedness": "preparedness",
-    "Confidence": "confidence",
+    "Semester 1": "sem1",
+    "Semester1": "sem1",
+    "Sem 1": "sem1",
+    "Sem1": "sem1",
+    "Semester 2": "sem2",
+    "Semester2": "sem2",
+    "Sem 2": "sem2",
+    "Sem2": "sem2",
     "Total (50)": "total",
     "Total": "total",
+    "Rating": "rating",
+    "Grade": "grade",
+    "Year": "year",
 }
 
-# Body defaults
+# Body defaults — ใช้ฟิลด์ตามสคีมาใหม่
 DEFAULT_FIELDS = [
-    ("name", "Name", True, 140.0, 160.0, "helv", 12, "none", "left"),
-    ("student_id", "Student ID", True, 140.0, 180.0, "helv", 11, "none", "left"),
-    ("idea", "Idea", False, 400.0, 220.0, "helv", 12, "none", "left"),
-    ("pronunciation", "Pronunciation", False, 460.0, 220.0, "helv", 12, "none", "left"),
-    ("preparedness", "Preparedness", False, 520.0, 220.0, "helv", 12, "none", "left"),
-    ("confidence", "Confidence", False, 580.0, 220.0, "helv", 12, "none", "left"),
-    ("total", "Total (50)", True, 640.0, 220.0, "helv", 14, "none", "left"),
+    ("name", "Name", True, 140.0, 160.0, "helv", 14, "title", "left"),
+    ("student_id", "Student ID", True, 140.0, 185.0, "helv", 12, "none", "left"),
+    ("sem1", "Semester 1", True, 420.0, 160.0, "helv", 14, "none", "left"),
+    ("sem2", "Semester 2", True, 520.0, 160.0, "helv", 14, "none", "left"),
+    ("total", "Total", True, 640.0, 160.0, "helv", 16, "none", "left"),
+    ("rating", "Rating", False, 420.0, 190.0, "helv", 12, "upper", "left"),
+    ("grade", "Grade", False, 520.0, 190.0, "helv", 12, "upper", "left"),
+    ("year", "Year", False, 640.0, 190.0, "helv", 12, "none", "left"),
 ]
 
-# Cover defaults (same fields, positions usually different)
+# Cover defaults — ใช้ฟิลด์เดียวกับ Body แต่ตำแหน่ง/ขนาดคนละชุด
 DEFAULT_COVER_FIELDS = [
-    ("name", "Name", True, 200.0, 260.0, "helv", 20, "none", "left"),
-    ("student_id", "Student ID", True, 200.0, 290.0, "helv", 16, "none", "left"),
-    ("total", "Total (50)", False, 200.0, 330.0, "helv", 18, "none", "left"),
+    ("name", "Name", True, 220.0, 260.0, "helv", 24, "title", "left"),
+    ("student_id", "Student ID", True, 220.0, 292.0, "helv", 16, "none", "left"),
+    ("year", "Year", False, 220.0, 324.0, "helv", 14, "none", "left"),
+    ("sem1", "Semester 1", False, 420.0, 260.0, "helv", 16, "none", "left"),
+    ("sem2", "Semester 2", False, 520.0, 260.0, "helv", 16, "none", "left"),
+    ("total", "Total", True, 420.0, 292.0, "helv", 20, "none", "left"),
+    ("rating", "Rating", False, 520.0, 292.0, "helv", 16, "upper", "left"),
+    ("grade", "Grade", False, 620.0, 292.0, "helv", 16, "upper", "left"),
 ]
 
 STD_FONTS = ["helv", "times", "cour"]  # Built-in fonts for PyMuPDF
@@ -65,7 +79,7 @@ STD_FONTS = ["helv", "times", "cour"]  # Built-in fonts for PyMuPDF
 # ------------------ Helpers ------------------
 
 def try_read_table(uploaded_file) -> pd.DataFrame:
-    """Read CSV/Excel into DataFrame."""
+    """Read CSV/Excel into DataFrame and normalize header whitespace."""
     if uploaded_file is None:
         return pd.DataFrame()
     name = uploaded_file.name.lower()
@@ -81,6 +95,8 @@ def try_read_table(uploaded_file) -> pd.DataFrame:
         else:
             st.warning(f"ไม่รองรับไฟล์: {uploaded_file.name}")
             return pd.DataFrame()
+        # Normalize header whitespace e.g. ' Total  ' -> 'Total'
+        df = df.rename(columns=lambda c: " ".join(str(c).split()))
     except Exception as e:
         st.error(f"อ่านไฟล์ {uploaded_file.name} ไม่ได้: {e}")
         return pd.DataFrame()
@@ -96,21 +112,25 @@ def canonicalize_columns(df: pd.DataFrame) -> pd.DataFrame:
         if c in CANONICAL_COLS:
             key = CANONICAL_COLS[c]
         else:
-            c2 = c.strip().lower().replace(" ", "").replace("-", "").replace("_", "")
+            c2 = str(c).strip().lower().replace(" ", "").replace("-", "").replace("_", "")
             if c2 in ["studentid", "id"]:
                 key = "student_id"
-            elif c2 in ["name", "namesurname", "namesurmane"]:
+            elif c2 in ["name", "namesurname"]:
                 key = "name"
+            elif c2 in ["semester1", "sem1"]:
+                key = "sem1"
+            elif c2 in ["semester2", "sem2"]:
+                key = "sem2"
             elif "total" in c2:
                 key = "total"
-            elif "idea" in c2:
-                key = "idea"
-            elif "pronun" in c2:
-                key = "pronunciation"
-            elif "prepared" in c2:
-                key = "preparedness"
-            elif "confid" in c2:
-                key = "confidence"
+            elif "rating" in c2:
+                key = "rating"
+            elif "grade" in c2:
+                key = "grade"
+            elif "year" in c2:
+                key = "year"
+            elif c2 == "no":
+                key = "no"
         new_cols[c] = key
     out = df.rename(columns=new_cols)
     return out
@@ -142,16 +162,17 @@ def build_field_df(existing_cols: List[str], defaults) -> pd.DataFrame:
     return df
 
 
-def apply_transform(text: str, mode: str) -> str:
-    if text is None:
+def apply_transform(text, mode: str) -> str:
+    if text is None or (isinstance(text, float) and pd.isna(text)):
         return ""
+    s = str(text)
     if mode == "upper":
-        return str(text).upper()
+        return s.upper()
     if mode == "lower":
-        return str(text).lower()
+        return s.lower()
     if mode == "title":
-        return str(text).title()
-    return str(text)
+        return s.title()
+    return s
 
 
 def get_record_display(rec: pd.Series, key_cols=("student_id", "name")) -> str:
@@ -220,9 +241,9 @@ def draw_on_image(img: Image.Image, fields_df: pd.DataFrame, record: pd.Series) 
 
 # ------------------ Streamlit UI ------------------
 
-st.set_page_config(page_title="PDF Layout Editor — CSV → Batch PDF (Global Cover, Unified Preset)", layout="wide")
-st.title("🖨️ PDF Layout Editor — CSV → Batch PDF (ปกหน้าแรกครั้งเดียว) + Preset เดียวรวม Body/Cover")
-st.caption("Cover ใช้ข้อมูลชุดเดียวกับ Body แต่มี Layout แยก • ปกอยู่หน้าแรก 1 ครั้ง • Preset .json รวมทั้ง Body/Cover และ cover_data_index")
+st.set_page_config(page_title="PDF Layout Editor — CSV (Unified) → Batch PDF", layout="wide")
+st.title("🖨️ PDF Layout Editor — CSV เดียว (Sem1/Sem2/Total/Rating/Grade/Year) → Batch PDF")
+st.caption("Cover ใช้ข้อมูลชุดเดียวกับ Body แต่มี Layout แยก • ปกอยู่หน้าแรก 1 ครั้ง • Preset .json รวม Body/Cover")
 
 colL, colR = st.columns([1.2, 1.0], gap="large")
 
@@ -235,85 +256,38 @@ with st.sidebar:
     cover_active = st.checkbox("Active ปก (หน้าแรกเสมอ; ไม่ต่อคน)", value=False)
     tpl_cover_pdf = st.file_uploader("Cover Template PDF", type=["pdf"])
     tpl_cover_img = st.file_uploader("หรือภาพ (PNG/JPG) Cover", type=["png", "jpg", "jpeg"])
-    cover_data_index = st.number_input("ข้อมูลสำหรับปก: ใช้แถวที่", min_value=0, value=0, step=1, help="ปกใช้ข้อมูลจากแถวนี้เพียงแถวเดียว")
+    cover_data_index = st.number_input("ข้อมูลสำหรับปก: ใช้แถวที่", min_value=0, value=0, step=1)
 
     if (tpl_pdf is not None or tpl_cover_pdf is not None) and fitz is None:
         st.warning("ติดตั้ง `pymupdf` เพื่อพรีวิว/ส่งออกจาก PDF\n\n`pip install pymupdf`")
 
-    st.header("📥 ข้อมูลนักเรียน")
-    csv_t1 = st.file_uploader("CSV เทอม 1", type=["csv", "xlsx", "xls"])
-    csv_t2 = st.file_uploader("CSV เทอม 2 (ไม่บังคับ)", type=["csv", "xlsx", "xls"])
-
-    st.divider()
-    join_key = st.selectbox("คีย์สำหรับจับคู่เทอม 1/2", ["student_id", "name"], index=0)
-    use_term = st.radio("เลือกชุดคะแนน", ["เทอม 1", "เทอม 2 (ถ้ามี)", "เฉลี่ย (Total เท่านั้น)"], index=0)
+    st.header("📥 ข้อมูล (CSV เดียว)")
+    csv_main = st.file_uploader("CSV หลัก (ตามสคีมาใหม่)", type=["csv", "xlsx", "xls"])
 
 with colL:
-    # Load data
-    df1 = canonicalize_columns(try_read_table(csv_t1))
-    df2 = canonicalize_columns(try_read_table(csv_t2))
+    # Load data — single CSV
+    df = canonicalize_columns(try_read_table(csv_main))
 
-    if df1.empty:
-        st.warning("อัปโหลด CSV เทอม 1 ก่อน")
+    if df.empty:
+        st.warning("อัปโหลด CSV ตามสคีมาใหม่ก่อน")
         st.stop()
 
-    for c in ["student_id", "name"]:
-        if c not in df1.columns:
-            df1[c] = ""
+    # Ensure important columns exist
+    for c in ["no", "student_id", "name", "sem1", "sem2", "total", "rating", "grade", "year"]:
+        if c not in df.columns:
+            df[c] = ""
 
-    active_df = df1.copy()
-    if not df2.empty and join_key in df2.columns:
-        merged = pd.merge(df1, df2, how="inner", on=join_key, suffixes=("_t1", "_t2"))
-        if use_term.startswith("เทอม 1"):
-            cols = []
-            for c in df1.columns:
-                if c + "_t1" in merged.columns:
-                    cols.append(c + "_t1")
-                elif c in merged.columns:
-                    cols.append(c)
-            active_df = merged[cols].copy()
-            active_df.columns = [c.replace("_t1", "") for c in active_df.columns]
-        elif use_term.startswith("เทอม 2"):
-            base_cols = sorted(set(df1.columns).union(df2.columns))
-            cols = []
-            for c in base_cols:
-                if c + "_t2" in merged.columns:
-                    cols.append(c + "_t2")
-                elif c in merged.columns:
-                    cols.append(c)
-            active_df = merged[cols].copy()
-            active_df.columns = [c.replace("_t2", "") for c in active_df.columns]
-        else:
-            def pick(col):
-                if col + "_t1" in merged and col + "_t2" in merged:
-                    return (merged[col + "_t1"] + merged[col + "_t2"]) / 2.0
-                if col + "_t1" in merged:
-                    return merged[col + "_t1"]
-                if col + "_t2" in merged:
-                    return merged[col + "_t2"]
-                return merged[col] if col in merged else None
-            base_cols = ["student_id", "name", "idea", "pronunciation", "preparedness", "confidence", "total"]
-            data = {}
-            for c in base_cols:
-                s = pick(c)
-                if s is not None:
-                    data[c] = s
-            active_df = pd.DataFrame(data)
-    else:
-        active_df = df1.copy()
-
-    if "no" not in active_df.columns and "No" in df1.columns:
-        active_df["no"] = df1["No"]
-
-    pref = ["no", "student_id", "name", "idea", "pronunciation", "preparedness", "confidence", "total"]
-    ordered = [c for c in pref if c in active_df.columns] + [c for c in active_df.columns if c not in pref]
-    active_df = active_df[ordered]
+    # Order columns nicely
+    pref = ["no", "student_id", "name", "sem1", "sem2", "total", "rating", "grade", "year"]
+    ordered = [c for c in pref if c in df.columns] + [c for c in df.columns if c not in pref]
+    active_df = df[ordered]
 
     st.subheader("📚 ข้อมูล (preview)")
-    st.dataframe(active_df.head(10), use_container_width=True)
+    st.dataframe(active_df.head(12), use_container_width=True)
 
 with colR:
     st.subheader("🧩 Preset (.json) — รวม Body + Cover")
+
     # Init session states
     if "fields_df" not in st.session_state:
         st.session_state["fields_df"] = build_field_df(active_df.columns.tolist(), DEFAULT_FIELDS)
@@ -327,8 +301,7 @@ with colR:
             if preset_json is not None:
                 try:
                     raw = json.load(preset_json)
-
-                    # Back-compat 1: flat list or {"fields":[...]} => Body only
+                    # Back-compat: list/fields => Body only
                     if isinstance(raw, list) or "fields" in raw:
                         fields_list = raw.get("fields", raw if isinstance(raw, list) else [])
                         new_df = pd.DataFrame(fields_list)
@@ -339,14 +312,12 @@ with colR:
                         st.session_state["fields_df"] = new_df[req]
                         st.info("โหลดเฉพาะ Body (legacy) แล้ว")
                     else:
-                        # Unified schema
                         body = raw.get("body", {})
                         cover = raw.get("cover", {})
                         if "fields" in body:
                             st.session_state["fields_df"] = pd.DataFrame(body["fields"])
                         if "fields" in cover:
                             st.session_state["cover_fields_df"] = pd.DataFrame(cover["fields"])
-                        # Optional data_row_index for cover
                         if "data_row_index" in cover:
                             st.session_state["cover_data_index_from_preset"] = int(cover["data_row_index"])
                         st.success("นำเข้า Preset (Body + Cover) สำเร็จ")
@@ -355,7 +326,7 @@ with colR:
         with col_e:
             try:
                 payload = {
-                    "version": 5,
+                    "version": 6,
                     "body": {"fields": st.session_state["fields_df"].to_dict(orient="records")},
                     "cover": {
                         "fields": st.session_state["cover_fields_df"].to_dict(orient="records"),
@@ -417,14 +388,13 @@ if len(idx_options) == 0:
 
 rec_idx = st.number_input("แถวที่ต้องการพรีวิว (Body)", min_value=0, max_value=len(idx_options)-1, value=0, step=1)
 record_body = active_df.iloc[int(rec_idx)]
-cov_idx = int(min(max(0, st.session_state.get("cover_data_index_from_preset", 0) if 'cover_data_index_from_preset' in st.session_state else 0 if 'cover_data_index' not in locals() else 0, cover_data_index), len(active_df) - 1))
 
-# if preset imported a data_row_index, prefer it unless user changes the widget
+# Cover record (global)
 if 'cover_data_index_from_preset' in st.session_state:
     cov_idx = int(min(max(0, st.session_state['cover_data_index_from_preset']), len(active_df)-1))
-    # show info and clear once rendered to avoid locking user
     st.info(f"Cover ใช้ index จาก preset: {cov_idx} (ปรับที่ Sidebar เพื่อเปลี่ยน)")
-    # do not clear automatically; let user override via Sidebar
+else:
+    cov_idx = int(min(max(0, cover_data_index), len(active_df)-1))
 
 record_cover = active_df.iloc[cov_idx]
 
@@ -560,4 +530,4 @@ if st.button("🚀 Export PDF"):
         st.error(f"ส่งออกไม่สำเร็จ: {e}")
 
 st.markdown("---")
-st.caption("Preset รวม: { version, body.fields[], cover.fields[], cover.data_row_index } • Canva แนะนำส่งออก PDF Standard หน้าเดียวเพื่อความคมชัด • ฟอนต์ PDF: helv / times / cour")
+st.caption("รับ CSV เดียวคอลัมน์: No, Student ID, Name, Semester 1, Semester 2, Total, Rating, Grade, Year • Preset รวม: { version, body.fields[], cover.fields[], cover.data_row_index } • ใช้ use_container_width เสมอ")
