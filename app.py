@@ -1,15 +1,14 @@
 # -*- coding: utf-8 -*-
 # =============================================================
 # Streamlit App: PDF Template Overlay + CSV -> Batch PDF Export (PDF-only)
-# Features:
-#   ✅ CSV เดียว (v2): No, Student ID, Name, Semester 1, Semester 2, Total, Rating, Grade, Year
-#   ✅ รองรับแปลงไฟล์ v1 -> v2 (v1 = No, Student ID, Name - Surname, Idea, Pronunciation, Preparedness, Confidence, Total (50))
-#   ✅ Template เฉพาะ PDF เท่านั้น (ไม่มีอัปโหลดรูป)
-#   ✅ Cover ใช้ข้อมูล "แถว 0 เสมอ" (บังคับ) + Active ปก
-#   ✅ Preset (.json) รวมไฟล์เดียว (Body + Cover) — data_row_index=0 เสมอ
+# Update:
+#   ✅ แสดงสถานะชัดเจนเมื่อโหลดเทมเพลตจาก GitHub อัตโนมัติ (Body/Cover)
+#   ✅ นำเข้า Preset (.json) จาก GitHub (raw) อัตโนมัติถ้าไม่อัปโหลด พร้อม URL ให้แก้ได้
+#   ✅ CSV เดียว (No, Student ID, Name, Semester 1, Semester 2, Total, Rating, Grade, Year)
+#   ✅ Cover ใช้ข้อมูล "แถว 0 เสมอ"
+#   ✅ Preset รวมไฟล์เดียว (Body + Cover) — บันทึก data_row_index=0 เสมอ
 #   ✅ พรีวิวสด — ใช้ use_container_width
-#   ✅ โหลดค่าเริ่มต้นเทมเพลต (Body/Cover), Preset และ CSV จาก GitHub อัตโนมัติ พร้อมแสดงสถานะชัดเจน
-#   ✅ ตารางข้อมูลแก้ไขได้ (ใช้ในการพรีวิว/ส่งออก)
+#   ✅ CSV Auto-load จาก GitHub (เหมือน Body/Cover) + แสดงสถานะ
 #
 # Install deps:
 #   pip install streamlit pandas pillow pymupdf requests
@@ -17,7 +16,7 @@
 
 import io
 import json
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 import streamlit as st
 import pandas as pd
@@ -29,17 +28,17 @@ try:
 except Exception:
     fitz = None
 
-from PIL import Image  # pixmap rendering
+from PIL import Image  # used to render pixmap previews
 
 # ------------------ Default URLs ------------------
-DEFAULT_COVER_URL = "https://github.com/firstnattapon/Canva/blob/main/Cover.pdf"         # will be converted to raw
-DEFAULT_BODY_URL  = "https://github.com/firstnattapon/Canva/blob/main/Template.pdf"      # will be converted to raw
-DEFAULT_PRESET_URL = "https://raw.githubusercontent.com/firstnattapon/Canva/main/layout_preset.json"
-DEFAULT_CSV_URL = "https://raw.githubusercontent.com/firstnattapon/Canva/main/Data.csv"
+DEFAULT_COVER_URL = "https://github.com/firstnattapon/Canva/blob/main/Cover.pdf"
+DEFAULT_BODY_URL  = "https://github.com/firstnattapon/Canva/blob/main/Template.pdf"
+DEFAULT_PRESET_URL = "https://raw.githubusercontent.com/firstnattapon/Canva/refs/heads/main/layout_preset.json"
+# ✅ NEW: Default CSV (auto GitHub)
+DEFAULT_CSV_URL = "https://raw.githubusercontent.com/firstnattapon/Canva/refs/heads/main/Data.csv"
 
 # ------------------ Canonical columns & defaults ------------------
 CANONICAL_COLS = {
-    # v2
     "No": "no",
     "Student ID": "student_id",
     "StudentID": "student_id",
@@ -54,16 +53,11 @@ CANONICAL_COLS = {
     "Semester2": "sem2",
     "Sem 2": "sem2",
     "Sem2": "sem2",
-    "Total (50)": "total50",
+    "Total (50)": "total",
     "Total": "total",
     "Rating": "rating",
     "Grade": "grade",
     "Year": "year",
-    # v1 component fields
-    "Idea": "idea",
-    "Pronunciation": "pronunciation",
-    "Preparedness": "preparedness",
-    "Confidence": "confidence",
 }
 
 # Body defaults
@@ -126,13 +120,26 @@ def fetch_default_json(url: str) -> Optional[bytes]:
 
 @st.cache_data(show_spinner=False, ttl=3600)
 def fetch_default_csv(url: str) -> Optional[bytes]:
+    """Fetch CSV bytes from GitHub (supports normal or raw URLs)."""
     try:
-        resp = requests.get(url, timeout=10)
+        raw_url = to_raw_github(url)
+        resp = requests.get(raw_url, timeout=10)
         resp.raise_for_status()
         return resp.content
     except Exception as e:
-        st.warning(f"โหลด CSV จาก {url} ไม่ได้: {e}")
+        st.warning(f"โหลด CSV เริ่มต้นจาก {url} ไม่ได้: {e}")
         return None
+
+
+def read_csv_bytes(b: bytes) -> pd.DataFrame:
+    """Read CSV bytes into DataFrame with BOM fallback + header trim."""
+    try:
+        df = pd.read_csv(io.BytesIO(b))
+    except UnicodeDecodeError:
+        df = pd.read_csv(io.BytesIO(b), encoding="utf-8-sig")
+    # Normalize header whitespace
+    df = df.rename(columns=lambda c: " ".join(str(c).split()))
+    return df
 
 
 def try_read_table(uploaded_file) -> pd.DataFrame:
@@ -178,8 +185,6 @@ def canonicalize_columns(df: pd.DataFrame) -> pd.DataFrame:
                 key = "sem1"
             elif c2 in ["semester2", "sem2"]:
                 key = "sem2"
-            elif "total(50)" in c2 or c2 == "total50":
-                key = "total50"
             elif "total" in c2:
                 key = "total"
             elif "rating" in c2:
@@ -190,14 +195,6 @@ def canonicalize_columns(df: pd.DataFrame) -> pd.DataFrame:
                 key = "year"
             elif c2 == "no":
                 key = "no"
-            elif "idea" in c2:
-                key = "idea"
-            elif "pronun" in c2:
-                key = "pronunciation"
-            elif "prepared" in c2:
-                key = "preparedness"
-            elif "confid" in c2:
-                key = "confidence"
         new_cols[c] = key
     out = df.rename(columns=new_cols)
     return out
@@ -268,7 +265,7 @@ def render_preview_with_pymupdf(template_bytes: bytes, fields_df: pd.DataFrame,
         if key not in record or pd.isna(record[key]):
             continue
         text = apply_transform(record[key], row["transform"])
-        x, y = float(row["x"]), float(row["y"])
+        x, y = float(row["x"]), float(row["y"]) 
         font = row.get("font", "helv")
         size = float(row.get("size", 12))
         try:
@@ -284,65 +281,11 @@ def render_preview_with_pymupdf(template_bytes: bytes, fields_df: pd.DataFrame,
     return img
 
 
-# ------------------ v1 -> v2 Converter ------------------
-
-def detect_v1_schema(df: pd.DataFrame) -> bool:
-    cols = set(df.columns.str.lower())
-    # v1 has these signatures
-    return ("name - surname".lower() in cols) or ("idea" in cols) or ("total (50)".lower() in cols)
-
-
-def convert_v1_to_v2(df_v1_raw: pd.DataFrame) -> Tuple[pd.DataFrame, dict]:
-    """Convert v1 sheet to v2 dataframe.
-       v1 cols: No, Student ID, Name - Surname, Idea, Pronunciation, Preparedness, Confidence, Total (50)
-       v2 cols: No, Student ID, Name, Semester 1, Semester 2, Total, Rating, Grade, Year
-    """
-    info = {"used_sum_components": False, "notes": []}
-    d = canonicalize_columns(df_v1_raw.copy())
-
-    # Make sure required columns exist
-    if "name" not in d.columns and "Name - Surname" in df_v1_raw.columns:
-        d["name"] = df_v1_raw["Name - Surname"]
-
-    # Compute total50 if missing
-    if "total50" not in d.columns:
-        comps = [c for c in ["idea", "pronunciation", "preparedness", "confidence"] if c in d.columns]
-        if comps:
-            d["total50"] = d[comps].apply(pd.to_numeric, errors="coerce").fillna(0).sum(axis=1)
-            info["used_sum_components"] = True
-            info["notes"].append("คำนวณ Total(50) จาก Idea+Pronunciation+Preparedness+Confidence")
-        else:
-            d["total50"] = pd.NA
-            info["notes"].append("ไม่พบ Total(50) และไม่มีองค์ประกอบเพียงพอ")
-
-    # Build v2 frame
-    out_cols = ["no", "student_id", "name", "sem1", "sem2", "total", "rating", "grade", "year"]
-    out = pd.DataFrame(columns=out_cols)
-
-    out["no"] = pd.to_numeric(d.get("no", pd.Series(range(1, len(d)+1))), errors="coerce")
-    out["student_id"] = d.get("student_id", "")
-    out["name"] = d.get("name", "")
-
-    out["sem1"] = pd.to_numeric(d.get("total50", pd.NA), errors="coerce")
-    out["sem2"] = pd.NA  # unknown from v1
-    # If sem2 is NaN, we can copy sem1 to total for convenience
-    out["total"] = out["sem1"]
-    out["rating"] = ""
-    out["grade"] = ""
-    out["year"] = ""
-
-    # Clean types
-    for c in ["no", "sem1", "sem2", "total"]:
-        out[c] = pd.to_numeric(out[c], errors="coerce")
-
-    return out[out_cols], info
-
-
 # ------------------ Streamlit UI ------------------
 
 st.set_page_config(page_title="PDF Layout Editor — CSV (Unified) → Batch PDF [PDF-only]", layout="wide")
 st.title("🖨️ PDF Layout Editor — CSV เดียว → Batch PDF (PDF-only, ปกครั้งเดียว)")
-st.caption("Cover ใช้ข้อมูลชุดเดียวกับ Body แต่มี Layout แยก • ปกอยู่หน้าแรก 1 ครั้ง • Preset .json รวม Body/Cover • รองรับ **PDF เท่านั้น** • ปกใช้ข้อมูล \"แถว 0\" เสมอ • มีตัวช่วยแปลง v1 → v2 • โหลดค่าเริ่มต้นจาก GitHub อัตโนมัติ")
+st.caption("Cover ใช้ข้อมูลชุดเดียวกับ Body แต่มี Layout แยก • ปกอยู่หน้าแรก 1 ครั้ง • Preset .json รวม Body/Cover • รองรับ **PDF เท่านั้น** • ปกใช้ข้อมูล \"แถว 0\" เสมอ • ถ้าไม่อัปโหลดจะโหลดค่าเริ่มต้นจาก GitHub อัตโนมัติ")
 
 if fitz is None:
     st.error("ต้องติดตั้ง PyMuPDF ก่อนใช้งาน: `pip install pymupdf`")
@@ -352,26 +295,23 @@ colL, colR = st.columns([1.2, 1.0], gap="large")
 
 with st.sidebar:
     st.header("📄 เทมเพลต — Body (PDF เท่านั้น)")
-    tpl_pdf = st.file_uploader("Template PDF (Body)", type=["pdf"])
+    tpl_pdf = st.file_uploader("Template PDF (Body)", type=["pdf"]) 
 
     st.header("🧾 เทมเพลต — ปก (PDF เท่านั้น)")
     cover_active = st.checkbox("Active ปก (หน้าแรกเสมอ; ไม่ต่อคน)", value=False)
-    tpl_cover_pdf = st.file_uploader("Cover Template PDF", type=["pdf"])
+    tpl_cover_pdf = st.file_uploader("Cover Template PDF", type=["pdf"]) 
 
-    st.header("📥 ข้อมูล (CSV v2)")
-    csv_main = st.file_uploader("CSV หลัก (v2 schema)", type=["csv", "xlsx", "xls"])
+    st.header("📥 ข้อมูล (CSV เดียว)")
+    csv_main = st.file_uploader("CSV หลัก (ตามสคีมาใหม่)", type=["csv", "xlsx", "xls"]) 
 
-    st.header("🔁 แปลงข้อมูล v1 → v2")
-    csv_v1 = st.file_uploader("CSV แบบ v1 (legacy)", type=["csv", "xlsx", "xls"], key="csv_v1")
-    do_convert = st.button("แปลงไฟล์ v1 → v2")
-
-# Auto-fetch defaults if not uploaded (templates + CSV + preset)
+# Auto-fetch defaults if not uploaded
 default_body_bytes = None
 default_cover_bytes = None
-default_csv_bytes = None
+default_csv_bytes = None  # ✅ NEW
+
 body_source = "uploaded" if tpl_pdf is not None else "github"  # tentative
 cover_source = "uploaded" if tpl_cover_pdf is not None else "github"  # tentative
-csv_source = "uploaded" if csv_main is not None else "github"  # tentative
+csv_source = "uploaded" if csv_main is not None else "github"  # ✅ NEW
 
 if tpl_pdf is None:
     default_body_bytes = fetch_default_pdf(DEFAULT_BODY_URL)
@@ -381,14 +321,15 @@ if cover_active and tpl_cover_pdf is None:
     default_cover_bytes = fetch_default_pdf(DEFAULT_COVER_URL)
     if default_cover_bytes is None:
         cover_source = "missing"
+# ✅ NEW: CSV auto-load when not uploaded
 if csv_main is None:
     default_csv_bytes = fetch_default_csv(DEFAULT_CSV_URL)
     if default_csv_bytes is None:
         csv_source = "missing"
 
-# Visible status for template/data sources
-st.subheader("🔔 สถานะเทมเพลต/ข้อมูล (Body • Cover • CSV)")
-c1, c2, c3 = st.columns(3)
+# Visible status for template sources
+st.subheader("🔔 สถานะเทมเพลต (Body/Cover)")
+c1, c2 = st.columns(2)
 with c1:
     if body_source == "uploaded":
         st.success("Body Template: ใช้ไฟล์ที่อัปโหลด")
@@ -406,116 +347,43 @@ with c2:
             st.info(f"Cover Template: โหลดจาก GitHub อัตโนมัติ\n{to_raw_github(DEFAULT_COVER_URL)}")
         else:
             st.error("Cover Template: ไม่พบทั้งไฟล์อัปโหลดและค่าเริ่มต้นจาก GitHub")
-with c3:
-    if csv_source == "uploaded":
-        st.success("CSV หลัก: ใช้ไฟล์ที่อัปโหลด")
-    elif csv_source == "github":
-        st.info(f"CSV หลัก: โหลดจาก GitHub อัตโนมัติ\n{DEFAULT_CSV_URL}")
-    else:
-        st.error("CSV หลัก: ไม่พบทั้งไฟล์อัปโหลดและค่าเริ่มต้นจาก GitHub")
+
+# ✅ NEW: CSV status
+st.subheader("🔔 สถานะข้อมูล (CSV)")
+if csv_source == "uploaded":
+    st.success("CSV: ใช้ไฟล์ที่อัปโหลด")
+elif csv_source == "github":
+    st.info(f"CSV: โหลดจาก GitHub อัตโนมัติ\n{to_raw_github(DEFAULT_CSV_URL)}")
+else:
+    st.error("CSV: ไม่พบทั้งไฟล์อัปโหลดและค่าเริ่มต้นจาก GitHub")
 
 with colL:
-    # Convert v1 -> v2 if requested
-    converted_df = None
-    convert_info = None
-    if do_convert and csv_v1 is not None:
-        df_v1 = try_read_table(csv_v1)
-        if df_v1.empty:
-            st.error("อ่านไฟล์ v1 ไม่ได้")
-        else:
-            converted_df, convert_info = convert_v1_to_v2(df_v1)
-            st.success("แปลง v1 → v2 สำเร็จ")
-            st.caption("นำไปใช้ต่อได้ทันที หรือดาวน์โหลดเป็น CSV")
-            st.dataframe(converted_df.head(12), use_container_width=True)
-            # Download converted CSV
-            buf = io.StringIO()
-            converted_df.to_csv(buf, index=False, encoding="utf-8-sig")
-            st.download_button("⬇️ ดาวน์โหลด CSV v2 (จาก v1)", data=buf.getvalue().encode("utf-8-sig"),
-                               file_name="converted_v2.csv", mime="text/csv")
-
-            if convert_info:
-                with st.expander("รายละเอียดการแปลง"):
-                    st.write(convert_info)
-
-            # Allow adopting converted data as active_df
-            if st.button("ใช้ข้อมูล v2 ที่แปลงแล้วกับแอปนี้"):
-                st.session_state["active_df"] = converted_df.copy()
-                st.session_state["csv_fingerprint"] = ("converted_v2_inline", tuple(converted_df.columns), len(converted_df))
-                st.success("ตั้งค่าข้อมูลสำหรับแอปเป็น v2 ที่แปลงแล้ว")
-
-    # Load data — preference order:
-    # 1) active_df from session_state (e.g., after conversion), else 2) uploaded csv, else 3) default GitHub csv
-    if "active_df" in st.session_state and st.session_state["active_df"] is not None and len(st.session_state["active_df"])>0:
-        df = st.session_state["active_df"].copy()
+    # Load data — single CSV (uploaded or default GitHub)
+    if csv_main is not None:
+        df = canonicalize_columns(try_read_table(csv_main))
     else:
-        if csv_main is not None:
-            df = canonicalize_columns(try_read_table(csv_main))
-        elif default_csv_bytes is not None:
-            # Robust CSV parser: default, utf-8-sig, or auto-sep
-            try:
-                df0 = pd.read_csv(io.BytesIO(default_csv_bytes))
-            except UnicodeDecodeError:
-                df0 = pd.read_csv(io.BytesIO(default_csv_bytes), encoding="utf-8-sig")
-            except Exception:
-                df0 = pd.read_csv(io.BytesIO(default_csv_bytes), sep=None, engine="python")
-            df0 = df0.rename(columns=lambda c: " ".join(str(c).split()))
-            df = canonicalize_columns(df0)
+        if default_csv_bytes is not None:
+            df = canonicalize_columns(read_csv_bytes(default_csv_bytes))
         else:
-            df = pd.DataFrame()
-
-    # Auto-detect v1 and offer auto-convert hint
-    if not df.empty and detect_v1_schema(df):
-        st.warning("ตรวจพบว่าไฟล์นี้อาจเป็นรูปแบบ v1 — คุณสามารถใช้ตัวช่วยแปลง v1 → v2 ที่ Sidebar")
+            st.warning("อัปโหลด CSV ตามสคีมาใหม่ก่อน หรือให้ระบบโหลดจาก GitHub ไม่สำเร็จ")
+            st.stop()
 
     if df.empty:
-        st.warning("อัปโหลด CSV v2 หรือแปลงจาก v1 ก่อน")
+        st.warning("CSV ว่างเปล่า")
         st.stop()
 
-    # Ensure important v2 columns exist
+    # Ensure important columns exist
     for c in ["no", "student_id", "name", "sem1", "sem2", "total", "rating", "grade", "year"]:
         if c not in df.columns:
             df[c] = ""
 
-    # Reorder
+    # Order columns nicely
     pref = ["no", "student_id", "name", "sem1", "sem2", "total", "rating", "grade", "year"]
     ordered = [c for c in pref if c in df.columns] + [c for c in df.columns if c not in pref]
     active_df = df[ordered]
 
-    # Dtype fixes for numeric columns (important for data_editor NumberColumn)
-    for _c in ["no", "sem1", "sem2", "total"]:
-        if _c in active_df.columns:
-            active_df[_c] = pd.to_numeric(active_df[_c], errors="coerce")
-
-    st.subheader("📚 ข้อมูล (preview) — แก้ไขได้ตรงนี้")
-    # Initialize or refresh session_state active_df when CSV changes (by basic fingerprint)
-    csv_name = getattr(csv_main, "name", None) if csv_main is not None else ("github_default" if default_csv_bytes is not None else None)
-    fingerprint = (csv_name, tuple(active_df.columns), len(active_df)) if csv_name else st.session_state.get("csv_fingerprint", None)
-    if ("active_df" not in st.session_state) or (st.session_state.get("csv_fingerprint") != fingerprint):
-        st.session_state["active_df"] = active_df.copy()
-        st.session_state["csv_fingerprint"] = fingerprint
-
-    edited = st.data_editor(
-        st.session_state["active_df"],
-        use_container_width=True,
-        num_rows="dynamic",
-        hide_index=False,
-        column_config={
-            "no": st.column_config.NumberColumn("No", step=1),
-            "student_id": st.column_config.TextColumn("Student ID"),
-            "name": st.column_config.TextColumn("Name"),
-            "sem1": st.column_config.NumberColumn("Semester 1"),
-            "sem2": st.column_config.NumberColumn("Semester 2"),
-            "total": st.column_config.NumberColumn("Total"),
-            "rating": st.column_config.TextColumn("Rating"),
-            "grade": st.column_config.TextColumn("Grade"),
-            "year": st.column_config.TextColumn("Year"),
-        },
-        key="editable_data",
-    )
-    # Persist edits for preview/export
-    st.session_state["active_df"] = edited
-    active_df = st.session_state["active_df"]
-    st.caption("การแก้ไขในตารางนี้จะถูกใช้ทั้งพรีวิวและส่งออก PDF")
+    st.subheader("📚 ข้อมูล (preview)")
+    st.dataframe(active_df.head(12), use_container_width=True)
 
 with colR:
     st.subheader("🧩 Preset (.json) — รวม Body + Cover (cover ใช้แถว 0 เสมอ)")
@@ -581,7 +449,7 @@ with colR:
         with col_e:
             try:
                 payload = {
-                    "version": 12,
+                    "version": 10,
                     "body": {"fields": st.session_state["fields_df"].to_dict(orient="records")},
                     "cover": {
                         "fields": st.session_state["cover_fields_df"].to_dict(orient="records"),
@@ -659,6 +527,8 @@ try:
                 caption=f"Body — {get_record_display(record_body)}",
                 use_container_width=True,
             )
+            if body_source == "github" and tpl_pdf is None:
+                st.caption(f"กำลังใช้ Body จาก GitHub: {to_raw_github(DEFAULT_BODY_URL)}")
             st.caption("Body: หน่วย X/Y = จุด (pt) — มุมซ้ายบนคือ (0,0)")
         else:
             st.info("อัปโหลด Template PDF ของ Body หรือให้ระบบโหลดค่าเริ่มต้นจาก GitHub (ตรวจสอบเครือข่าย)")
@@ -671,6 +541,8 @@ try:
                     caption=f"Cover — ใช้ข้อมูลแถวที่ 0 (แถวแรก) — {get_record_display(record_cover)}",
                     use_container_width=True,
                 )
+                if cover_source == "github" and tpl_cover_pdf is None:
+                    st.caption(f"กำลังใช้ Cover จาก GitHub: {to_raw_github(DEFAULT_COVER_URL)}")
                 st.caption("Cover: หน่วย X/Y = จุด (pt) — มุมซ้ายบนคือ (0,0) • ใช้ข้อมูลจากแถวที่ 0 เสมอ")
             else:
                 st.info("เปิด Active ปก แล้ว—อัปโหลด Cover Template PDF หรือให้ระบบโหลดค่าเริ่มต้นจาก GitHub (ตรวจสอบเครือข่าย)")
@@ -705,7 +577,7 @@ if st.button("🚀 Export PDF"):
                         if key not in record_cover or pd.isna(record_cover[key]):
                             continue
                         text = apply_transform(record_cover[key], row["transform"])
-                        x, y = float(row["x"]), float(row["y"])
+                        x, y = float(row["x"]), float(row["y"]) 
                         font = row.get("font", "helv"); size = float(row.get("size", 12))
                         try:
                             page0.insert_text((x, y), str(text), fontname=font if font in STD_FONTS else "helv",
@@ -728,7 +600,7 @@ if st.button("🚀 Export PDF"):
                     if key not in rec or pd.isna(rec[key]):
                         continue
                     text = apply_transform(rec[key], row["transform"])
-                    x, y = float(row["x"]), float(row["y"])
+                    x, y = float(row["x"]), float(row["y"]) 
                     font = row.get("font", "helv"); size = float(row.get("size", 12))
                     try:
                         page.insert_text((x, y), str(text), fontname=font if font in STD_FONTS else "helv",
@@ -746,4 +618,4 @@ if st.button("🚀 Export PDF"):
         st.error(f"ส่งออกไม่สำเร็จ: {e}")
 
 st.markdown("---")
-st.caption("CSV v2: No, Student ID, Name, Semester 1, Semester 2, Total, Rating, Grade, Year • Preset รวม (data_row_index=0) • PDF-only • มีตัวช่วยแปลง v1→v2 • โหลด GitHub อัตโนมัติ (Template + CSV + Preset) พร้อมบอกสถานะ")
+st.caption("CSV: No, Student ID, Name, Semester 1, Semester 2, Total, Rating, Grade, Year • Preset รวม (data_row_index=0) • ใช้ PDF เท่านั้น • มีโหมดโหลดจาก GitHub อัตโนมัติ (Template + Preset + CSV)")
