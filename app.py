@@ -271,7 +271,7 @@ with st.sidebar:
     tpl_pdf = st.file_uploader("Template PDF (Body)", type=["pdf"])
 
     st.header("🧾 เทมเพลต — ปก (PDF เท่านั้น)")
-    cover_active = st.checkbox("Active ปก", value=True)
+    cover_active = st.checkbox("Active ปก (หน้าแรกเสมอ; ไม่ต่อคน)", value=False)
     tpl_cover_pdf = st.file_uploader("Cover Template PDF", type=["pdf"])
 
     st.header("📥 ข้อมูล (CSV เดียว)")
@@ -298,7 +298,7 @@ with c1:
     if body_source == "uploaded":
         st.success("Body Template: ใช้ไฟล์ที่อัปโหลด")
     elif body_source == "github":
-        st.info(f"Template: โหลดจาก อัตโนมัติ")
+        st.info(f"Body Template: โหลดจาก GitHub อัตโนมัติ\n{to_raw_github(DEFAULT_BODY_URL)}")
     else:
         st.error("Body Template: ไม่พบทั้งไฟล์อัปโหลดและค่าเริ่มต้นจาก GitHub")
 with c2:
@@ -308,7 +308,7 @@ with c2:
         if cover_source == "uploaded":
             st.success("Cover Template: ใช้ไฟล์ที่อัปโหลด")
         elif cover_source == "github":
-            st.info(f"Cover Template: โหลดจาก  อัตโนมัติ")
+            st.info(f"Cover Template: โหลดจาก GitHub อัตโนมัติ\n{to_raw_github(DEFAULT_COVER_URL)}")
         else:
             st.error("Cover Template: ไม่พบทั้งไฟล์อัปโหลดและค่าเริ่มต้นจาก GitHub")
 
@@ -330,9 +330,36 @@ with colL:
     ordered = [c for c in pref if c in df.columns] + [c for c in df.columns if c not in pref]
     active_df = df[ordered]
 
-    st.subheader("📚 ข้อมูล (preview)")
-    st.dataframe(active_df.head(12), use_container_width=True)
+    st.subheader("📚 ข้อมูล (preview) — แก้ไขได้ตรงนี้")
+    # Initialize or refresh session_state active_df when CSV changes (by basic fingerprint)
+    csv_name = getattr(csv_main, "name", None)
+    fingerprint = (csv_name, tuple(active_df.columns), len(active_df))
+    if ("active_df" not in st.session_state) or (st.session_state.get("csv_fingerprint") != fingerprint):
+        st.session_state["active_df"] = active_df.copy()
+        st.session_state["csv_fingerprint"] = fingerprint
 
+    edited = st.data_editor(
+        st.session_state["active_df"],
+        use_container_width=True,
+        num_rows="dynamic",
+        hide_index=False,
+        column_config={
+            "no": st.column_config.NumberColumn("No", step=1),
+            "student_id": st.column_config.TextColumn("Student ID"),
+            "name": st.column_config.TextColumn("Name"),
+            "sem1": st.column_config.NumberColumn("Semester 1"),
+            "sem2": st.column_config.NumberColumn("Semester 2"),
+            "total": st.column_config.NumberColumn("Total"),
+            "rating": st.column_config.TextColumn("Rating"),
+            "grade": st.column_config.TextColumn("Grade"),
+            "year": st.column_config.TextColumn("Year"),
+        },
+        key="editable_data",
+    )
+    # Persist edits for preview/export
+    st.session_state["active_df"] = edited
+    active_df = st.session_state["active_df"]
+    st.caption("การแก้ไขในตารางนี้จะถูกใช้ทั้งพรีวิวและส่งออก PDF")\n
 with colR:
     st.subheader("🧩 Preset (.json) — รวม Body + Cover (cover ใช้แถว 0 เสมอ)")
 
