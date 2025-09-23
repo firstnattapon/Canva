@@ -329,6 +329,10 @@ with colL:
     pref = ["no", "student_id", "name", "sem1", "sem2", "total", "rating", "grade", "year"]
     ordered = [c for c in pref if c in df.columns] + [c for c in df.columns if c not in pref]
     active_df = df[ordered]
+    # Ensure numeric dtype for editor compatibility
+    for _c in ["no", "sem1", "sem2", "total"]:
+        if _c in active_df.columns:
+            active_df[_c] = pd.to_numeric(active_df[_c], errors="coerce")
 
     st.subheader("📚 ข้อมูล (preview) — แก้ไขได้ตรงนี้")
     # Initialize or refresh session_state active_df when CSV changes (by basic fingerprint)
@@ -594,3 +598,4 @@ if st.button("🚀 Export PDF"):
 
 st.markdown("---")
 st.caption("CSV: No, Student ID, Name, Semester 1, Semester 2, Total, Rating, Grade, Year • Preset รวม (data_row_index=0) • ใช้ PDF เท่านั้น • มีโหมดโหลดจาก GitHub อัตโนมัติ (Template + Preset) พร้อมบอกสถานะชัดเจน")
+
