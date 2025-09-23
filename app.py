@@ -1,7 +1,7 @@
 import io
 import streamlit as st
 import pandas as pd
-import fitz  # PyMuPDF
+import pymupdf as fitz  # <<< ใช้ pymupdf เพื่อเลี่ยงแพ็กเกจชื่อซ้ำ "fitz"
 
 st.set_page_config(page_title="Conversation Result (Per Student Pages)", layout="wide")
 st.title("📄 Conversation Result → 1 หน้า/1 คน (รองรับ 1–2 เทอม)")
@@ -53,7 +53,6 @@ def _decode_csv_bytes(b: bytes) -> str:
             return b.decode(enc)
         except Exception:
             continue
-    # fallback แบบไม่แครช
     return b.decode("utf-8", errors="ignore")
 
 def parse_csv_bytes(b: bytes) -> pd.DataFrame:
@@ -86,7 +85,7 @@ def parse_csv_bytes(b: bytes) -> pd.DataFrame:
         mask_score = df["No"].astype(str).str.strip().str.lower().eq("score")
         df = df[~mask_score]
         df = df[df["No"].astype(str).str.strip() != ""]
-    # ถ้า header เพี้ยนเล็กน้อย (space/เคาะ) ให้ strip
+    # strip header ให้สะอาด
     df.columns = [c.strip() for c in df.columns]
     return df.reset_index(drop=True)
 
@@ -111,7 +110,7 @@ def merge_semesters(df1: pd.DataFrame, df2: pd.DataFrame, key: str, when_single:
         merged["Total_S1"] = merged.get("Total (50)_S1", "")
         merged["Total_S2"] = merged.get("Total (50)_S2", "")
         out = merged[["Name","StudentID","Total_S1","Total_S2"]].copy()
-        # จัดเรียงเพื่อให้อ่านง่าย
+        # เรียงเพื่อให้อ่านง่าย
         if key == "Student ID":
             out = out.sort_values(by=["StudentID","Name"], kind="stable")
         else:
@@ -132,7 +131,7 @@ def merge_semesters(df1: pd.DataFrame, df2: pd.DataFrame, key: str, when_single:
     else:
         out["Total_S1"] = ""
         out["Total_S2"] = df.get("Total (50)", "")
-    # จัดเรียง
+    # เรียง
     if key == "Student ID":
         out = out.sort_values(by=["StudentID","Name"], kind="stable")
     else:
