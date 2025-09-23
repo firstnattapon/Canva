@@ -3,3 +3,4 @@ pandas>=2.1
 pymupdf>=1.24.12
 reportlab>=3.6
 pypdf>=4.0
+requests
