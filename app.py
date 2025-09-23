@@ -383,11 +383,11 @@ with st.sidebar:
     tpl_pdf = st.file_uploader("Template PDF (Body)", type=["pdf"]) 
 
     st.header("🧾 เทมเพลต — ปก (PDF เท่านั้น)")
-    cover_active = st.checkbox("Active ปก (หน้าแรกเสมอ; ไม่ต่อคน)", value=True)
+    cover_active = st.checkbox("Active ปก (หน้าแรก)", value=True)
     tpl_cover_pdf = st.file_uploader("Cover Template PDF", type=["pdf"]) 
 
-    st.header("📥 ข้อมูล (CSV เดียว)")
-    csv_main = st.file_uploader("CSV หลัก (ตามสคีมาใหม่)", type=["csv", "xlsx", "xls"]) 
+    st.header("📥 ข้อมูล (CSV)")
+    csv_main = st.file_uploader("CSV หลัก)", type=["csv", "xlsx", "xls"]) 
 
 # Auto-fetch defaults if not uploaded
 default_body_bytes = None
@@ -552,7 +552,7 @@ with st.sidebar:
 
 # ============ MAIN TABS (Goal_1) ============
 tab1, tab2 = st.tabs([
-    "🔎 พรีวิว + 📦 ส่งออก PDF ทั้งชุด",
+    "🔎 พรีวิว + 📦 Export PDF",
     "📚 ข้อมูล (preview) + 🧩 Preset (.json)",
 ])
 
@@ -601,7 +601,7 @@ with tab1:
                     use_container_width=True,
                 )
                 if body_source == "github" and tpl_pdf is None:
-                    st.caption(f"กำลังใช้ Body จาก GitHub: {to_raw_github(DEFAULT_BODY_URL)}")
+                    # st.caption(f"กำลังใช้ Body จาก GitHub: {to_raw_github(DEFAULT_BODY_URL)}")
                 st.caption("Body: หน่วย X/Y = จุด (pt) — มุมซ้ายบนคือ (0,0)")
             else:
                 st.info("อัปโหลด Template PDF ของ Body หรือให้ระบบโหลดค่าเริ่มต้นจาก GitHub (ตรวจสอบเครือข่าย)")
@@ -625,7 +625,7 @@ with tab1:
         st.error(f"พรีวิวผิดพลาด: {e}")
 
     st.divider()
-    st.subheader("📦 ส่งออก PDF ทั้งชุด (ปกหน้าแรก 1 ครั้ง + Body 1 หน้า/คน)")
+    st.subheader("📦 ส่งออก PDF ทั้งชุด")
 
     if st.button("🚀 Export PDF"):
         try:
