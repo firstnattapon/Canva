@@ -220,8 +220,8 @@ def render_preview_with_pymupdf(template_bytes: bytes, fields_df: pd.DataFrame,
 # ------------------ Streamlit UI ------------------
 
 st.set_page_config(page_title="PDF Layout Editor — CSV (Unified) → Batch PDF [PDF-only]", layout="wide")
-st.title("🖨️ PDF Layout Editor — CSV เดียว → Batch PDF (PDF-only, ปกครั้งเดียว)")
-st.caption("Cover ใช้ข้อมูลชุดเดียวกับ Body แต่มี Layout แยก • ปกอยู่หน้าแรก 1 ครั้ง • Preset .json รวม Body/Cover • รองรับ **PDF เท่านั้น** • ปกใช้ข้อมูล \"แถว 0\" เสมอ")
+st.title("🖨️ PDF Layout Editor")
+# st.caption("Cover ใช้ข้อมูลชุดเดียวกับ Body แต่มี Layout แยก • ปกอยู่หน้าแรก 1 ครั้ง • Preset .json รวม Body/Cover • รองรับ **PDF เท่านั้น** • ปกใช้ข้อมูล \"แถว 0\" เสมอ")
 
 if fitz is None:
     st.error("ต้องติดตั้ง PyMuPDF ก่อนใช้งาน: `pip install pymupdf`")
