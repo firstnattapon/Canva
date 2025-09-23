@@ -1,390 +1,209 @@
-# streamlit run app.py
-# -*- coding: utf-8 -*-
-
 import io
-import os
-from datetime import datetime
-import math
-
 import streamlit as st
 import pandas as pd
+import fitz  # PyMuPDF
 
-# PDF rendering
-from reportlab.pdfgen import canvas as rl_canvas
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.lib.utils import ImageReader
+st.set_page_config(page_title="Conversation Result (Per Student Pages)", layout="wide")
+st.title("📄 Conversation Result → 1 หน้า/1 คน (รองรับ 1–2 เทอม)")
+st.caption("พื้นหลังจาก Canva (อัปโหลด PDF หนึ่งหน้า) + CSV คะแนน → แปลงเป็น PDF รายคนแบบ 35 หน้า")
 
-from pypdf import PdfReader, PdfWriter, PageObject
+# ========== Sidebar: Layout & Options ==========
+st.sidebar.header("🔧 ตำแหน่งข้อความ (หน่วย pt)")
+name_x = st.sidebar.number_input("Name X", 0, 2000, 140)
+name_y = st.sidebar.number_input("Name Y", 0, 2000, 160)
+id_x   = st.sidebar.number_input("Student ID X", 0, 2000, 140)
+id_y   = st.sidebar.number_input("Student ID Y", 0, 2000, 190)
+s1_x   = st.sidebar.number_input("Total S1 X", 0, 2000, 430)
+s1_y   = st.sidebar.number_input("Total S1 Y", 0, 2000, 300)
+s2_x   = st.sidebar.number_input("Total S2 X", 0, 2000, 430)
+s2_y   = st.sidebar.number_input("Total S2 Y", 0, 2000, 340)
 
-from PIL import Image
+st.sidebar.header("🅰️ ฟอนต์")
+font_size = st.sidebar.number_input("ขนาดตัวอักษร", 6, 64, 16)
+bold = st.sidebar.checkbox("ตัวหนา (Helvetica Bold)", value=True)
 
-# =========================
-# CONFIG หน้า & ฟอนต์
-# =========================
-st.set_page_config(page_title="Conversation Test Result Grade 2/5 — PDF Export", layout="wide")
+st.sidebar.header("🔗 การแม็ปข้อมูลระหว่างเทอม")
+join_key = st.sidebar.selectbox("คีย์จับคู่ข้อมูล", ["Student ID", "Name - Surname"], index=0)
+when_single = st.sidebar.selectbox("ถ้าอัปโหลด CSV แค่ 1 เทอม ใส่ลงช่องไหน?", ["S1", "S2"], index=0)
 
-DEFAULT_CSV_PATH = "/mnt/data/สเปรดชีตไม่มีชื่อ - P.2.csv"  # ใช้ได้ในสภาพแวดล้อมที่รองรับเท่านั้น
-OUTPUT_NAME = "Conversation_Test_Result_Grade_2-5.pdf"
+st.sidebar.caption("A4 แนวตั้ง ≈ 595×842 pt • ปรับตำแหน่งแล้วกดพรีวิวให้เข้าที่ 100%")
 
-# พยายามหา NotoSansThai ก่อน ถ้าไม่เจอจะ fallback ไป DejaVuSans
-FALLBACK_FONT = "DejaVuSans"
-FONT_NORMAL_NAME = "NotoSansThai-Regular"
-FONT_BOLD_NAME = "NotoSansThai-Bold"
+# ========== Uploaders ==========
+with st.expander("วิธีใช้แบบเร็ว"):
+    st.markdown("""
+1) อัปโหลด **Template PDF** จาก Canva (ต้องเป็นหน้าเดียว)  
+2) อัปโหลด **CSV เทอม 1** และ/หรือ **CSV เทอม 2** โครงสร้าง:
+   `No, Student ID, Name - Surname, Idea, Pronunciation, Preparedness, Confidence, Total (50)`  
+   - รองรับแถว `Score` และบรรทัดว่าง (ระบบคัดทิ้งให้เอง)  
+3) ตั้งพิกัด **Name / Student ID / Total S1 / Total S2**  
+4) เลือกคีย์จับคู่ระหว่างเทอม (ID หรือ Name)  
+5) พรีวิว 1 หน้า → Export ทั้งชุด (หนึ่งหน้า/หนึ่งคน)
+""")
 
-# =========================
-# ฟังก์ชันช่วยงาน
-# =========================
-def try_register_thai_fonts(uploaded_regular: bytes | None, uploaded_bold: bytes | None):
-    """ลงทะเบียนฟอนต์ไทย (NotoSansThai) ถ้ามี; ไม่งั้น fallback เป็น DejaVuSans"""
-    registered = False
-    # 1) จากไฟล์อัปโหลด
-    if uploaded_regular:
+tpl_file = st.file_uploader("อัปโหลด Template PDF (พื้นหลัง Canva / หน้าเดียว)", type=["pdf"])
+csv_s1 = st.file_uploader("อัปโหลด CSV เทอม 1", type=["csv"])
+csv_s2 = st.file_uploader("อัปโหลด CSV เทอม 2 (ถ้ามี)", type=["csv"])
+
+REQUIRED_COLS = ["No","Student ID","Name - Surname","Idea","Pronunciation","Preparedness","Confidence","Total (50)"]
+
+# ========== CSV Parsing (robust) ==========
+def _decode_csv_bytes(b: bytes) -> str:
+    for enc in ("utf-8-sig", "utf-8", "cp874", "latin-1"):
         try:
-            pdfmetrics.registerFont(TTFont(FONT_NORMAL_NAME, io.BytesIO(uploaded_regular)))
-            registered = True
+            return b.decode(enc)
         except Exception:
-            pass
-    if uploaded_bold:
-        try:
-            pdfmetrics.registerFont(TTFont(FONT_BOLD_NAME, io.BytesIO(uploaded_bold)))
-        except Exception:
-            # ไม่มี Bold ก็ไม่เป็นไร ใช้ Regular แทน
-            pass
+            continue
+    # fallback แบบไม่แครช
+    return b.decode("utf-8", errors="ignore")
 
-    # 2) จากระบบ (ถ้าไม่ได้อัปโหลด)
-    search_candidates = [
-        "/usr/share/fonts/truetype/noto/NotoSansThai-Regular.ttf",
-        "/usr/share/fonts/opentype/noto/NotoSansThai-Regular.otf",
-    ]
-    if not registered:
-        for p in search_candidates:
-            if os.path.exists(p):
-                try:
-                    pdfmetrics.registerFont(TTFont(FONT_NORMAL_NAME, p))
-                    registered = True
-                    break
-                except Exception:
-                    continue
-
-    # 3) ลงทะเบียน fallback
-    if not registered:
-        # Fallback จะใช้ชื่อ DejaVuSans ซึ่งโดยปกติ reportlab มากับระบบหลายที่
-        try:
-            pdfmetrics.getFont(FALLBACK_FONT)
-        except Exception:
-            # ถ้าไม่มีจริงๆ ให้บอกผู้ใช้ให้อัปโหลดฟอนต์
-            st.warning("หา NotoSansThai/DejaVuSans ไม่เจอ โปรดอัปโหลดฟอนต์ .ttf อย่างน้อย 1 ไฟล์")
-        return FALLBACK_FONT, FALLBACK_FONT
-
-    # ถ้าได้ Regular แล้ว แต่ยังไม่มี Bold ให้ผูก Bold = Regular
-    try:
-        pdfmetrics.getFont(FONT_BOLD_NAME)
-    except Exception:
-        return FONT_NORMAL_NAME, FONT_NORMAL_NAME
-    return FONT_NORMAL_NAME, FONT_BOLD_NAME
-
-
-def guess_col(df: pd.DataFrame, candidates: list[str], default=None):
-    cols = [c.lower().strip() for c in df.columns]
-    for name in candidates:
-        if name.lower() in cols:
-            return df.columns[cols.index(name.lower())]
-    # ลองแบบ contains
-    for c in df.columns:
-        cl = c.lower().replace(" ", "")
-        for name in candidates:
-            if name.lower().replace(" ", "") in cl:
-                return c
-    return default
-
-
-def normalize_dataframe(df: pd.DataFrame) -> pd.DataFrame:
-    # เดาแมปคอลัมน์หลัก ๆ แบบยืดหยุ่น (รองรับไทย/อังกฤษ/สะกดหลากหลาย)
-    mapping = {}
-
-    mapping["no"] = guess_col(df, ["no", "ลำดับ", "ลำดับที่", "เลขที่", "#"])
-    mapping["studentId"] = guess_col(df, ["studentid", "student id", "id", "รหัส", "เลขประจำตัว"])
-    mapping["name"] = guess_col(df, ["name", "ชื่อ-สกุล", "ชื่อ", "student name", "นักเรียน"])
-
-    mapping["idea"] = guess_col(df, ["idea", "ไอเดีย", "ความคิด", "creativity", "ความคิดสร้างสรรค์"])
-    mapping["pronunciation"] = guess_col(df, ["pronunciation", "การออกเสียง", "ออกเสียง"])
-    mapping["preparedness"] = guess_col(df, ["preparedness", "ความพร้อม", "การเตรียมตัว"])
-    mapping["confidence"] = guess_col(df, ["confidence", "ความมั่นใจ"])
-    mapping["total"] = guess_col(df, ["total", "คะแนนรวม", "รวม", "finaltotal"])
-    mapping["grade"] = guess_col(df, ["grade", "เกรด", "ผลการเรียน", "ระดับ"])
-
-    # สร้าง df ใหม่ตามลำดับคอลัมน์มาตรฐาน
-    out = pd.DataFrame()
-    for k in ["no", "studentId", "name", "idea", "pronunciation", "preparedness", "confidence", "total", "grade"]:
-        if mapping.get(k) in df.columns:
-            out[k] = df[mapping[k]]
-        else:
-            out[k] = ""
-
-    # แปลงชนิดข้อมูลบางคอลัมน์ให้ปลอดภัย
-    for k in ["idea", "pronunciation", "preparedness", "confidence", "total"]:
-        try:
-            out[k] = pd.to_numeric(out[k], errors="coerce")
-        except Exception:
-            pass
-    # เติมลำดับถ้ายังว่าง
-    if out["no"].isna().all() or (out["no"] == "").all():
-        out["no"] = range(1, len(out) + 1)
-
-    # ตัดสเปซชื่อ
-    out["name"] = out["name"].astype(str).str.strip()
-
-    return out
-
-
-def read_background_as_pdf(base_file: bytes, filename: str) -> PdfReader:
-    """รับไฟล์เทมเพลตจาก Canva ที่เป็น PDF หรือ PNG แล้วคืนเป็น PdfReader 1 หน้า
-       - ถ้าเป็น PNG/JPG: แปลงเป็น PDF ขนาดภาพ 1:1
-       - ถ้าเป็น PDF: อ่านตรง ๆ
-    """
-    name_lower = filename.lower()
-    if name_lower.endswith(".pdf"):
-        return PdfReader(io.BytesIO(base_file))
-    else:
-        # แปลงรูปเป็น PDF 1 หน้า
-        img = Image.open(io.BytesIO(base_file)).convert("RGB")
-        w, h = img.size  # พิกเซล
-        # สร้าง PDF ขนาดเท่ารูป โดย 1 px ~ 1 pt (พอใช้ได้สำหรับ overlay ตรงตำแหน่ง)
-        buf = io.BytesIO()
-        c = rl_canvas.Canvas(buf, pagesize=(w, h))
-        c.drawImage(ImageReader(img), 0, 0, width=w, height=h, mask='auto')
-        c.showPage()
-        c.save()
-        buf.seek(0)
-        return PdfReader(buf)
-
-
-def make_overlay_page(width_pt, height_pt, rows, start_index, rows_per_page,
-                      cols_config, row_height, top_y, font_regular, font_bold, font_size, df):
-    """สร้างหน้า overlay PDF หนึ่งหน้า (เฉพาะตัวหนังสือในตาราง) แล้วคืนเป็น PdfReader/Page"""
-    page_buf = io.BytesIO()
-    canv = rl_canvas.Canvas(page_buf, pagesize=(width_pt, height_pt))
-
-    # เลือกฟอนต์
-    canv.setFont(font_regular, font_size)
-
-    # เขียนแต่ละแถว
-    for i in range(rows_per_page):
-        row_idx = start_index + i
-        if row_idx >= rows:
+def parse_csv_bytes(b: bytes) -> pd.DataFrame:
+    """อ่าน CSV ที่อาจมีบรรทัดว่าง/หัวตารางไม่ชัด • คืน DataFrame เฉพาะคอลัมน์ที่ต้องใช้"""
+    if b is None:
+        return None
+    text = _decode_csv_bytes(b)
+    # อ่านแบบไม่มี header ก่อน เพื่อหาแถวหัวตารางเอง
+    df_raw = pd.read_csv(io.StringIO(text), header=None, dtype=str)
+    header_idx = None
+    max_scan = min(20, len(df_raw))
+    for i in range(max_scan):
+        row_vals = df_raw.iloc[i].fillna("").astype(str).tolist()
+        if "No" in row_vals and "Student ID" in row_vals:
+            header_idx = i
             break
-        y = top_y - i * row_height
-
-        # ดึงค่าจาก df
-        rec = df.iloc[row_idx]
-        for col in cols_config:
-            key = col["key"]
-            x = col["x"]
-            align = col.get("align", "left")
-            max_width = col.get("max_width", None)
-            text = "" if pd.isna(rec.get(key, "")) else str(rec.get(key, ""))
-
-            # จัดรูปแบบตัวเลขสวย ๆ
-            if key in ["idea", "pronunciation", "preparedness", "confidence", "total"]:
-                try:
-                    v = float(rec.get(key))
-                    # ถ้าเป็นจำนวนเต็ม ไม่ต้องมีทศนิยม
-                    text = f"{int(v)}" if abs(v - int(v)) < 1e-9 else f"{v:.2f}"
-                except Exception:
-                    pass
-
-            # ย่อชื่อถ้ายาวเกิน
-            if max_width:
-                # วัดความกว้างคร่าว ๆ โดยอาศัย stringWidth
-                while pdfmetrics.stringWidth(text, font_regular, font_size) > max_width and len(text) > 0:
-                    text = text[:-1]
-                # ใส่ … ถ้าตัด
-                # (ถ้าถูกตัดจนหมดจะไม่ใส่)
-                if pdfmetrics.stringWidth(text, font_regular, font_size) > max_width and len(text) > 1:
-                    text = text[:-1] + "…"
-
-            # วางข้อความ
-            if align == "center":
-                canv.drawCentredString(x, y, text)
-            elif align == "right":
-                canv.drawRightString(x, y, text)
-            else:
-                canv.drawString(x, y, text)
-
-    canv.showPage()
-    canv.save()
-    page_buf.seek(0)
-    overlay_reader = PdfReader(page_buf)
-    return overlay_reader.pages[0]
-
-
-def merge_background_and_overlay(bg_reader: PdfReader, overlay_pages: list[PageObject]) -> bytes:
-    """ซ้อน overlay ทุกหน้าไปบนพื้นหลัง (ถ้าพื้นหลังมีหน้าน้อย จะวนใช้หน้าแรกซ้ำ)"""
-    out = PdfWriter()
-    bg_pages = len(bg_reader.pages)
-    for i, ov in enumerate(overlay_pages):
-        bg_page = bg_reader.pages[i % bg_pages]
-        # ทำสำเนา ไม่แก้ต้นฉบับ
-        new_page = PageObject.create_blank_page(width=bg_page.mediabox.width, height=bg_page.mediabox.height)
-        new_page.merge_page(bg_page)    # วาง background ก่อน
-        new_page.merge_page(ov)         # ซ้อน overlay
-        out.add_page(new_page)
-
-    buf = io.BytesIO()
-    out.write(buf)
-    buf.seek(0)
-    return buf.read()
-
-
-# =========================
-# UI
-# =========================
-st.title("Conversation Test Result Grade 2/5 → PDF (Overlay on Canva Template)")
-
-left, right = st.columns([2, 1])
-
-with left:
-    st.subheader("1) เลือกไฟล์ข้อมูล")
-    csv_file = None
-    default_exists = os.path.exists(DEFAULT_CSV_PATH)
-    src = st.radio("แหล่งข้อมูล", ["อัปโหลด CSV", "ใช้ไฟล์ดีฟอลต์ในระบบ" if default_exists else "อัปโหลด CSV"], horizontal=True)
-    if src == "อัปโหลด CSV" or not default_exists:
-        csv_upl = st.file_uploader("อัปโหลด CSV (UTF-8) จาก Google Sheets/Excel", type=["csv"])
-        if csv_upl is not None:
-            csv_file = io.BytesIO(csv_upl.read())
+    if header_idx is None:
+        # ลองอ่านแบบมี header ปกติ
+        df = pd.read_csv(io.StringIO(text), dtype=str).fillna("")
     else:
-        csv_file = DEFAULT_CSV_PATH
+        headers = df_raw.iloc[header_idx].fillna("").astype(str).tolist()
+        df = df_raw.iloc[header_idx+1:].copy()
+        df.columns = headers
+        df = df.fillna("")
+    # เก็บเฉพาะคอลัมน์ที่ต้องใช้
+    cols = [c for c in df.columns if c in REQUIRED_COLS]
+    df = df[cols]
+    # ตัดแถว Score และแถวว่าง
+    if "No" in df.columns:
+        mask_score = df["No"].astype(str).str.strip().str.lower().eq("score")
+        df = df[~mask_score]
+        df = df[df["No"].astype(str).str.strip() != ""]
+    # ถ้า header เพี้ยนเล็กน้อย (space/เคาะ) ให้ strip
+    df.columns = [c.strip() for c in df.columns]
+    return df.reset_index(drop=True)
 
-    st.subheader("2) อัปโหลดเทมเพลต (พื้นหลังจาก Canva)")
-    bg_upl = st.file_uploader("รองรับ PDF/PNG/JPG — แนะนำ: Export จาก Canva เป็น PDF (พรินต์คุณภาพสูง)", type=["pdf", "png", "jpg", "jpeg"])
+# ========== Merge Semesters ==========
+def coalesce(a, b):
+    a = "" if pd.isna(a) else str(a)
+    b = "" if pd.isna(b) else str(b)
+    return a if a.strip() else b
 
-    st.subheader("3) (ทางเลือก) อัปโหลดฟอนต์ไทย .ttf")
-    colf1, colf2 = st.columns(2)
-    font_regular_upl = colf1.file_uploader("NotoSansThai-Regular.ttf", type=["ttf"])
-    font_bold_upl = colf2.file_uploader("NotoSansThai-Bold.ttf", type=["ttf"])
-
-with right:
-    st.subheader("ตัวเลือกการจัดวาง (ปรับให้ตรงกับเส้นตารางใน Canva)")
-    rows_per_page = st.number_input("จำนวนแถวต่อหน้า", min_value=5, max_value=40, value=20, step=1)
-    top_y = st.number_input("ตำแหน่ง Y ของแถวบนสุด (pt)", min_value=100, max_value=1500, value=620, step=1)
-    row_height = st.number_input("ความสูงแต่ละแถว (pt)", min_value=10, max_value=50, value=22, step=1)
-    font_size = st.number_input("ขนาดฟอนต์ (pt)", min_value=8, max_value=16, value=10, step=1)
-
-    st.markdown("**ตำแหน่งคอลัมน์ (x pt จากซ้าย):**")
-    # กำหนดตำแหน่งคอลัมน์พื้นฐานให้ใกล้เคียง A4 แนวตั้ง
-    x_no = st.number_input("x: No.", value=40, step=1)
-    x_id = st.number_input("x: Student ID", value=75, step=1)
-    x_name = st.number_input("x: Name", value=160, step=1)
-    x_idea = st.number_input("x: Idea", value=355, step=1)
-    x_pro = st.number_input("x: Pronunciation", value=408, step=1)
-    x_pre = st.number_input("x: Preparedness", value=470, step=1)
-    x_conf = st.number_input("x: Confidence", value=535, step=1)
-    x_total = st.number_input("x: Total", value=600, step=1)
-    x_grade = st.number_input("x: Grade", value=640, step=1)
-
-    maxw_name = st.number_input("Max width: Name (pt)", min_value=0, max_value=500, value=180, step=5)
-
-st.divider()
-
-go = st.button("🚀 สร้าง PDF เหมือนต้นฉบับ")
-
-if go:
-    # 0) โหลดฟอนต์
-    font_regular, font_bold = try_register_thai_fonts(
-        font_regular_upl.read() if font_regular_upl else None,
-        font_bold_upl.read() if font_bold_upl else None
-    )
-
-    # 1) อ่าน CSV
-    if csv_file is None:
-        st.error("ยังไม่ได้เลือกไฟล์ CSV")
-        st.stop()
-    try:
-        if isinstance(csv_file, str):  # path
-            df = pd.read_csv(csv_file)
+def merge_semesters(df1: pd.DataFrame, df2: pd.DataFrame, key: str, when_single: str) -> pd.DataFrame:
+    """รวม 2 เทอมด้วย key ที่เลือก → คอลัมน์ Name / StudentID / Total_S1 / Total_S2"""
+    if df1 is not None and df2 is not None:
+        merged = pd.merge(df1, df2, on=key, how="outer", suffixes=("_S1","_S2"))
+        # ชื่อ / รหัส
+        name = []
+        sid  = []
+        for _, r in merged.iterrows():
+            name.append(coalesce(r.get("Name - Surname_S1",""), r.get("Name - Surname_S2","")))
+            sid.append(coalesce(r.get("Student ID_S1",""), r.get("Student ID_S2","")))
+        merged["Name"] = name
+        merged["StudentID"] = sid
+        merged["Total_S1"] = merged.get("Total (50)_S1", "")
+        merged["Total_S2"] = merged.get("Total (50)_S2", "")
+        out = merged[["Name","StudentID","Total_S1","Total_S2"]].copy()
+        # จัดเรียงเพื่อให้อ่านง่าย
+        if key == "Student ID":
+            out = out.sort_values(by=["StudentID","Name"], kind="stable")
         else:
-            df = pd.read_csv(csv_file)
-    except UnicodeDecodeError:
-        # รองรับกรณีเป็น Excel แอบเปลี่ยน encoding
-        df = pd.read_csv(csv_file, encoding="utf-8-sig")
-    except Exception as e:
-        st.error(f"อ่าน CSV ไม่สำเร็จ: {e}")
-        st.stop()
+            out = out.sort_values(by=["Name","StudentID"], kind="stable")
+        out = out.reset_index(drop=True)
+        return out
 
-    df_norm = normalize_dataframe(df)
+    # ถ้ามีแค่ไฟล์เดียว
+    df = df1 if df1 is not None else df2
+    if df is None:
+        return None
+    out = pd.DataFrame()
+    out["Name"] = df.get("Name - Surname", "")
+    out["StudentID"] = df.get("Student ID", "")
+    if when_single == "S1":
+        out["Total_S1"] = df.get("Total (50)", "")
+        out["Total_S2"] = ""
+    else:
+        out["Total_S1"] = ""
+        out["Total_S2"] = df.get("Total (50)", "")
+    # จัดเรียง
+    if key == "Student ID":
+        out = out.sort_values(by=["StudentID","Name"], kind="stable")
+    else:
+        out = out.sort_values(by=["Name","StudentID"], kind="stable")
+    return out.reset_index(drop=True)
 
-    st.success(f"โหลดข้อมูล {len(df_norm)} แถว เรียบร้อย")
+# ========== Drawing ==========
+def draw_one(page, name, sid, total_s1, total_s2, font_size=16, bold=True):
+    fontname = "helvb" if bold else "helv"
+    def put(x, y, text):
+        if text is None: 
+            return
+        s = str(text).strip()
+        if not s: 
+            return
+        page.insert_text((x, y), s, fontsize=font_size, fontname=fontname, fill=(0,0,0))
+    put(name_x, name_y, name)
+    put(id_x,   id_y,   sid)
+    put(s1_x,   s1_y,   total_s1)
+    put(s2_x,   s2_y,   total_s2)
 
-    # 2) เทมเพลตพื้นหลัง
-    if bg_upl is None:
-        st.error("โปรดอัปโหลดพื้นหลังจาก Canva (PDF/PNG/JPG) เพื่อให้ตรง 100%")
-        st.stop()
-
-    try:
-        bg_reader = read_background_as_pdf(bg_upl.read(), bg_upl.name)
-    except Exception as e:
-        st.error(f"อ่านเทมเพลตไม่สำเร็จ: {e}")
-        st.stop()
-
-    # ใช้หน้าพื้นหลังหน้าแรกเพื่ออ้างอิงขนาดเพจ
-    w = float(bg_reader.pages[0].mediabox.width)
-    h = float(bg_reader.pages[0].mediabox.height)
-
-    # 3) เตรียมคอนฟิกคอลัมน์
-    cols_cfg = [
-        {"key": "no", "x": x_no, "align": "center"},
-        {"key": "studentId", "x": x_id, "align": "left"},
-        {"key": "name", "x": x_name, "align": "left", "max_width": maxw_name},
-        {"key": "idea", "x": x_idea, "align": "center"},
-        {"key": "pronunciation", "x": x_pro, "align": "center"},
-        {"key": "preparedness", "x": x_pre, "align": "center"},
-        {"key": "confidence", "x": x_conf, "align": "center"},
-        {"key": "total", "x": x_total, "align": "center"},
-        {"key": "grade", "x": x_grade, "align": "center"},
-    ]
-
-    # 4) เรนเดอร์ overlay ทีละหน้า
-    total_rows = len(df_norm)
-    pages = math.ceil(total_rows / rows_per_page)
-    overlay_pages = []
-    for p in range(pages):
-        start_idx = p * rows_per_page
-        ov = make_overlay_page(
-            width_pt=w,
-            height_pt=h,
-            rows=total_rows,
-            start_index=start_idx,
-            rows_per_page=rows_per_page,
-            cols_config=cols_cfg,
-            row_height=row_height,
-            top_y=top_y,
-            font_regular=font_regular,
-            font_bold=font_bold,
+def build_pdf(template_bytes: bytes, records: pd.DataFrame, font_size=16, bold=True) -> bytes:
+    tpl = fitz.open("pdf", template_bytes)
+    if tpl.page_count < 1:
+        raise ValueError("Template PDF ต้องมีอย่างน้อย 1 หน้า")
+    w, h = tpl[0].rect.width, tpl[0].rect.height
+    out = fitz.open()
+    for _, r in records.iterrows():
+        page = out.new_page(width=w, height=h)
+        page.show_pdf_page(page.rect, tpl, 0)  # วางพื้นหลัง Canva
+        draw_one(
+            page,
+            r.get("Name",""),
+            r.get("StudentID",""),
+            r.get("Total_S1",""),
+            r.get("Total_S2",""),
             font_size=font_size,
-            df=df_norm,
+            bold=bold
         )
-        overlay_pages.append(ov)
+    return out.tobytes()
 
-    # 5) Merge กับพื้นหลัง
-    try:
-        merged_pdf_bytes = merge_background_and_overlay(bg_reader, overlay_pages)
-    except Exception as e:
-        st.error(f"รวมเลเยอร์ไม่สำเร็จ: {e}")
-        st.stop()
+# ========== Main ==========
+if tpl_file is None:
+    st.info("อัปโหลด **Template PDF (หน้าเดียว)** ก่อน")
+else:
+    tpl_bytes = tpl_file.getvalue()
+    df1 = parse_csv_bytes(csv_s1.getvalue()) if csv_s1 is not None else None
+    df2 = parse_csv_bytes(csv_s2.getvalue()) if csv_s2 is not None else None
 
-    # 6) ส่งออก
-    # ตั้งชื่อไฟล์ตามต้นฉบับ
-    dt = datetime.now().strftime("%Y%m%d-%H%M%S")
-    out_name = f"{OUTPUT_NAME[:-4]}_{dt}.pdf"
+    if (df1 is None) and (df2 is None):
+        st.warning("ยังไม่พบ CSV คะแนน กรุณาอัปโหลดอย่างน้อย 1 เทอม")
+    else:
+        if df1 is not None:
+            st.subheader("CSV เทอม 1 (ตัวอย่าง 10 แถว)")
+            st.dataframe(df1.head(10), use_container_width=True)
+        if df2 is not None:
+            st.subheader("CSV เทอม 2 (ตัวอย่าง 10 แถว)")
+            st.dataframe(df2.head(10), use_container_width=True)
 
-    st.success("✅ สร้าง PDF เรียบร้อย (ซ้อนทับกับเทมเพลต Canva เพื่อความเหมือน 100%)")
-    st.download_button("⬇️ ดาวน์โหลดไฟล์ PDF", data=merged_pdf_bytes, file_name=out_name, mime="application/pdf")
+        key = "Student ID" if join_key == "Student ID" else "Name - Surname"
+        merged = merge_semesters(df1, df2, key, when_single)
+        st.success(f"รวมข้อมูลพร้อมแปลง: {len(merged)} คน (1 หน้า/คน)")
 
-    with st.expander("พรีวิวแถวต้น ๆ ของข้อมูล (ตรวจความถูกต้องเร็ว ๆ)"):
-        st.dataframe(df_norm.head(20), use_container_width=True)
-
-    st.info(
-        "ถ้าอักษรเหลื่อมเส้นตาราง: ปรับค่าพิกัดในแถบขวา (Top Y, Row Height, x ของแต่ละคอลัมน์, ขนาดฟอนต์).\n"
-        "หลักการคือเราใช้หน้าออกจาก Canva เป็นพื้นหลังทั้งหมด แล้วพิมพ์เฉพาะตัวเลข/ชื่อทับลงไป."
-    )
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("👀 พรีวิวหน้าแรก"):
+                one = merged.head(1)
+                pdf_bytes = build_pdf(tpl_bytes, one, font_size=font_size, bold=bold)
+                st.download_button("ดาวน์โหลดพรีวิว (PDF 1 หน้า)", pdf_bytes, file_name="preview_1page.pdf")
+        with c2:
+            if st.button("📦 Export ทั้งชุด (PDF รวมทุกคน)"):
+                pdf_bytes = build_pdf(tpl_bytes, merged, font_size=font_size, bold=bold)
+                st.download_button("⬇️ ดาวน์โหลด PDF รวม", pdf_bytes, file_name="Conversation_PerStudent_Output.pdf")
+                st.balloons()
