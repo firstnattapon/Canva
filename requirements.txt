@@ -6,4 +6,4 @@ pypdf
 pillow
 fitz
 frontend
-pymupdf
+PyMuPDF
