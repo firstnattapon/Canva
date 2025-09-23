@@ -65,14 +65,14 @@ CANONICAL_COLS = {
 
 # Body defaults
 DEFAULT_FIELDS = [
-    ("no", "No", True, 140.0, 160.0, "helv", 14, "title", "left"),    
-    ("name", "Name", True, 140.0, 160.0, "helv", 14, "title", "left"),
-    ("student_id", "Student ID", True, 140.0, 185.0, "helv", 12, "none", "left"),
-    ("sem1", "Semester 1", True, 420.0, 160.0, "helv", 14, "none", "left"),
-    ("sem2", "Semester 2", True, 520.0, 160.0, "helv", 14, "none", "left"),
+    ("no", "No", True, 140.0, 160.0, "times", 14, "none", "left"),    
+    ("name", "Name", True, 250.0, 226.0, "times", 12, "none", "left"),
+    ("student_id", "Student ID", True, 311.0, 185.0, "times", 12, "none", "left"),
+    ("sem1", "Semester 1", True, 236.0, 390.0, "times", 12, "none", "left"),
+    ("sem2", "Semester 2", False, 520.0, 160.0, "helv", 14, "none", "left"),
     ("total", "Total", True, 640.0, 160.0, "helv", 16, "none", "left"),
-    ("rating", "Rating", False, 420.0, 190.0, "helv", 12, "upper", "left"),
-    ("grade", "Grade", False, 520.0, 190.0, "helv", 12, "upper", "left"),
+    ("rating", "Rating", False, 420.0, 190.0, "helv", 12, "none", "left"),
+    ("grade", "Grade", False, 520.0, 190.0, "helv", 12, "none", "left"),
     ("year", "Year", False, 640.0, 190.0, "helv", 12, "none", "left"),
 ]
 
