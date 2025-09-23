@@ -374,7 +374,7 @@ with st.sidebar:
     tpl_pdf = st.file_uploader("Template PDF (Body)", type=["pdf"]) 
 
     st.header("🧾 เทมเพลต — ปก (PDF เท่านั้น)")
-    cover_active = st.checkbox("Active ปก (หน้าแรกเสมอ; ไม่ต่อคน)", value=False)
+    cover_active = st.checkbox("Active ปก (หน้าแรกเสมอ; ไม่ต่อคน)", value=True)
     tpl_cover_pdf = st.file_uploader("Cover Template PDF", type=["pdf"]) 
 
     st.header("📥 ข้อมูล (CSV เดียว)")
