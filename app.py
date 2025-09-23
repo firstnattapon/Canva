@@ -67,7 +67,7 @@ CANONICAL_COLS = {
 DEFAULT_FIELDS = [
     ("no", "No", True, 140.0, 160.0, "times", 14, "none", "left"),    
     ("name", "Name", True, 250.0, 226.0, "times", 12, "none", "left"),
-    ("student_id", "Student ID", True, 311.0, 185.0, "times", 12, "none", "left"),
+    ("student_id", "Student ID", True, 311.0, 209.0, "times", 12, "none", "left"),
     ("sem1", "Semester 1", True, 236.0, 390.0, "times", 12, "none", "left"),
     ("sem2", "Semester 2", False, 520.0, 160.0, "helv", 14, "none", "left"),
     ("total", "Total", True, 640.0, 160.0, "helv", 16, "none", "left"),
