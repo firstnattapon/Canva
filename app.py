@@ -190,41 +190,41 @@ def build_one_page_overlay_pdf(page_w: float, page_h: float,
     c.showPage(); c.save()
     return buf.getvalue()
 
-def merge_overlay_on_template(template_pdf_bytes: bytes, overlay_pdf_bytes_list: list[bytes]) -> bytes:
-    from pypdf import PdfReader, PdfWriter
-    writer = PdfWriter()
-    for ov_bytes in overlay_pdf_bytes_list:
-        tpl_reader = PdfReader(io.BytesIO(template_pdf_bytes))
-        base_page = tpl_reader.pages[0]
-        ov_reader = PdfReader(io.BytesIO(ov_bytes))
-        ov_page = ov_reader.pages[0]
-        base_page.merge_page(ov_page)  # วางทับด้วยพื้นขาวรองแล้วค่อยตัวหนังสือ
-        writer.add_page(base_page)
-    out = io.BytesIO()
-    writer.write(out); out.seek(0)
-    return out.getvalue()
+# def merge_overlay_on_template(template_pdf_bytes: bytes, overlay_pdf_bytes_list: list[bytes]) -> bytes:
+#     from pypdf import PdfReader, PdfWriter
+#     writer = PdfWriter()
+#     for ov_bytes in overlay_pdf_bytes_list:
+#         tpl_reader = PdfReader(io.BytesIO(template_pdf_bytes))
+#         base_page = tpl_reader.pages[0]
+#         ov_reader = PdfReader(io.BytesIO(ov_bytes))
+#         ov_page = ov_reader.pages[0]
+#         base_page.merge_page(ov_page)  # วางทับด้วยพื้นขาวรองแล้วค่อยตัวหนังสือ
+#         writer.add_page(base_page)
+#     out = io.BytesIO()
+#     writer.write(out); out.seek(0)
+#     return out.getvalue()
 
-def make_preview_pdf(template_pdf_bytes: bytes, rec: dict,
-                     font_size: float, bold: bool,
-                     name_xy, id_xy, s1_xy, s2_xy,
-                     top_left_mode: bool,
-                     font_bytes: bytes | None,
-                     whiteout: bool, pad_x: float, pad_y: float) -> bytes:
-    from pypdf import PdfReader
-    reader = PdfReader(io.BytesIO(template_pdf_bytes))
-    pg = reader.pages[0]
-    page_w = float(pg.mediabox.width); page_h = float(pg.mediabox.height)
-    overlay = build_one_page_overlay_pdf(
-        page_w, page_h,
-        rec.get("Name",""), rec.get("StudentID",""),
-        rec.get("Total_S1",""), rec.get("Total_S2",""),
-        font_size, bold,
-        name_xy, id_xy, s1_xy, s2_xy,
-        top_left_mode,
-        font_bytes,
-        whiteout, pad_x, pad_y
-    )
-    return merge_overlay_on_template(template_pdf_bytes, [overlay])
+# def make_preview_pdf(template_pdf_bytes: bytes, rec: dict,
+#                      font_size: float, bold: bool,
+#                      name_xy, id_xy, s1_xy, s2_xy,
+#                      top_left_mode: bool,
+#                      font_bytes: bytes | None,
+#                      whiteout: bool, pad_x: float, pad_y: float) -> bytes:
+#     from pypdf import PdfReader
+#     reader = PdfReader(io.BytesIO(template_pdf_bytes))
+#     pg = reader.pages[0]
+#     page_w = float(pg.mediabox.width); page_h = float(pg.mediabox.height)
+#     overlay = build_one_page_overlay_pdf(
+#         page_w, page_h,
+#         rec.get("Name",""), rec.get("StudentID",""),
+#         rec.get("Total_S1",""), rec.get("Total_S2",""),
+#         font_size, bold,
+#         name_xy, id_xy, s1_xy, s2_xy,
+#         top_left_mode,
+#         font_bytes,
+#         whiteout, pad_x, pad_y
+#     )
+#     return merge_overlay_on_template(template_pdf_bytes, [overlay])
 
 def make_full_pdf(template_pdf_bytes: bytes, records: pd.DataFrame,
                   font_size: float, bold: bool,
