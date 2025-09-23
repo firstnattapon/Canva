@@ -72,7 +72,7 @@ DEFAULT_FIELDS = [
     ("sem2", "Semester 2", False, 520.0, 160.0, "helv", 14, "none", "left"),
     ("total", "Total", True, 640.0, 160.0, "helv", 16, "none", "left"),
     ("rating", "Rating", False, 420.0, 190.0, "helv", 12, "none", "left"),
-    ("grade", "Grade", False, 520.0, 190.0, "helv", 12, "none", "left"),
+    ("grade", "Grade", True, 348.0, 209.0, "times", 12, "none", "left"),
     ("year", "Year", False, 640.0, 190.0, "helv", 12, "none", "left"),
 ]
 
