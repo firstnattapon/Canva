@@ -2,22 +2,26 @@
 # =============================================================
 # Streamlit App: PDF Template Overlay + CSV -> Batch PDF Export (PDF-only)
 # Spec update:
-#   ✅ รับไฟล์ CSV เดียว: No, Student ID, Name, Semester 1, Semester 2, Total, Rating, Grade, Year
+#   ✅ CSV เดียว: No, Student ID, Name, Semester 1, Semester 2, Total, Rating, Grade, Year
 #   ✅ Template เฉพาะ PDF เท่านั้น (ไม่มีอัปโหลดรูป)
-#   ✅ Cover ใช้ข้อมูล "แถวที่ 0 เสมอ" (บังคับ) และลบ UI เลือกแถวออกแล้ว
+#   ✅ Cover ใช้ข้อมูล "แถวที่ 0 เสมอ" (บังคับ)
 #   ✅ Preset (.json) รวมไฟล์เดียว (Body + Cover) — บันทึก data_row_index=0 เสมอ
 #   ✅ พรีวิวสด (Body/Cover) — ใช้ use_container_width
+#   ✅ ถ้าไม่อัปโหลดเทมเพลต จะโหลดค่าเริ่มต้นจาก GitHub อัตโนมัติ:
+#         Cover:  https://github.com/firstnattapon/Canva/blob/main/Cover.pdf
+#         Body:   https://github.com/firstnattapon/Canva/blob/main/Template.pdf
 #
 # Install deps:
-#   pip install streamlit pandas pillow pymupdf
+#   pip install streamlit pandas pillow pymupdf requests
 # =============================================================
 
 import io
 import json
-from typing import List
+from typing import List, Optional
 
 import streamlit as st
 import pandas as pd
+import requests
 
 # PDF dependency
 try:
@@ -26,6 +30,11 @@ except Exception:
     fitz = None
 
 from PIL import Image  # used to render pixmap previews
+
+# ------------------ Default URLs ------------------
+DEFAULT_COVER_URL = "https://github.com/firstnattapon/Canva/blob/main/Cover.pdf"
+DEFAULT_BODY_URL  = "https://github.com/firstnattapon/Canva/blob/main/Template.pdf"
+
 
 # ------------------ Canonical columns & defaults ------------------
 CANONICAL_COLS = {
@@ -77,6 +86,30 @@ DEFAULT_COVER_FIELDS = [
 STD_FONTS = ["helv", "times", "cour"]  # Built-in fonts for PyMuPDF
 
 # ------------------ Helpers ------------------
+
+def to_raw_github(url: str) -> str:
+    # Transform GitHub web URL -> raw.githubusercontent URL
+    # e.g. https://github.com/user/repo/blob/branch/path -> https://raw.githubusercontent.com/user/repo/branch/path
+    if "github.com/" in url and "/blob/" in url:
+        return url.replace("github.com/", "raw.githubusercontent.com/").replace("/blob/", "/")
+    return url
+
+
+@st.cache_data(show_spinner=False, ttl=3600)
+def fetch_default_pdf(url: str) -> Optional[bytes]:
+    try:
+        raw_url = to_raw_github(url)
+        resp = requests.get(raw_url, timeout=10)
+        resp.raise_for_status()
+        # Basic content-type sanity (but don't block if missing)
+        if "application/pdf" not in resp.headers.get("Content-Type", "") and not raw_url.lower().endswith(".pdf"):
+            # still return; PyMuPDF will error if not PDF
+            pass
+        return resp.content
+    except Exception as e:
+        st.warning(f"โหลดค่าเริ่มต้นจาก {url} ไม่ได้: {e}")
+        return None
+
 
 def try_read_table(uploaded_file) -> pd.DataFrame:
     """Read CSV/Excel into DataFrame and normalize header whitespace."""
@@ -220,8 +253,8 @@ def render_preview_with_pymupdf(template_bytes: bytes, fields_df: pd.DataFrame,
 # ------------------ Streamlit UI ------------------
 
 st.set_page_config(page_title="PDF Layout Editor — CSV (Unified) → Batch PDF [PDF-only]", layout="wide")
-st.title("🖨️ PDF Layout Editor")
-# st.caption("Cover ใช้ข้อมูลชุดเดียวกับ Body แต่มี Layout แยก • ปกอยู่หน้าแรก 1 ครั้ง • Preset .json รวม Body/Cover • รองรับ **PDF เท่านั้น** • ปกใช้ข้อมูล \"แถว 0\" เสมอ")
+st.title("🖨️ PDF Layout Editor — CSV เดียว → Batch PDF (PDF-only, ปกครั้งเดียว)")
+st.caption("Cover ใช้ข้อมูลชุดเดียวกับ Body แต่มี Layout แยก • ปกอยู่หน้าแรก 1 ครั้ง • Preset .json รวม Body/Cover • รองรับ **PDF เท่านั้น** • ปกใช้ข้อมูล \"แถว 0\" เสมอ • ถ้าไม่อัปโหลดจะโหลดค่าเริ่มต้นจาก GitHub อัตโนมัติ")
 
 if fitz is None:
     st.error("ต้องติดตั้ง PyMuPDF ก่อนใช้งาน: `pip install pymupdf`")
@@ -234,11 +267,19 @@ with st.sidebar:
     tpl_pdf = st.file_uploader("Template PDF (Body)", type=["pdf"])
 
     st.header("🧾 เทมเพลต — ปก (PDF เท่านั้น)")
-    cover_active = st.checkbox("Active ปก", value=True)
+    cover_active = st.checkbox("Active ปก (หน้าแรกเสมอ; ไม่ต่อคน)", value=False)
     tpl_cover_pdf = st.file_uploader("Cover Template PDF", type=["pdf"])
 
     st.header("📥 ข้อมูล (CSV เดียว)")
     csv_main = st.file_uploader("CSV หลัก (ตามสคีมาใหม่)", type=["csv", "xlsx", "xls"])
+
+# Auto-fetch defaults if not uploaded
+default_body_bytes = None
+default_cover_bytes = None
+if tpl_pdf is None:
+    default_body_bytes = fetch_default_pdf(DEFAULT_BODY_URL)
+if cover_active and tpl_cover_pdf is None:
+    default_cover_bytes = fetch_default_pdf(DEFAULT_COVER_URL)
 
 with colL:
     # Load data — single CSV
@@ -262,7 +303,7 @@ with colL:
     st.dataframe(active_df.head(12), use_container_width=True)
 
 with colR:
-    st.subheader("🧩 Preset (.json)")
+    st.subheader("🧩 Preset (.json) — รวม Body + Cover (cover ใช้แถว 0 เสมอ)")
 
     # Init session states
     if "fields_df" not in st.session_state:
@@ -294,14 +335,14 @@ with colR:
                             st.session_state["fields_df"] = pd.DataFrame(body["fields"])
                         if "fields" in cover:
                             st.session_state["cover_fields_df"] = pd.DataFrame(cover["fields"])
-                        # Ignore any data_row_index from preset — always 0 per spec
+                        # data_row_index ถูกบังคับเป็น 0 เสมอในแอปนี้
                         st.success("นำเข้า Preset (Body + Cover) สำเร็จ — ใช้แถว 0 สำหรับปกเสมอ")
                 except Exception as e:
                     st.error(f"อ่านไฟล์ JSON ไม่ได้: {e}")
         with col_e:
             try:
                 payload = {
-                    "version": 8,
+                    "version": 9,
                     "body": {"fields": st.session_state["fields_df"].to_dict(orient="records")},
                     "cover": {
                         "fields": st.session_state["cover_fields_df"].to_dict(orient="records"),
@@ -372,67 +413,75 @@ page_type = st.radio("หน้าไหน", ["Body", "Cover"], index=0, horizo
 
 try:
     if page_type == "Body":
-        if tpl_pdf is not None:
+        body_src = tpl_pdf.getvalue() if tpl_pdf is not None else default_body_bytes
+        if body_src is not None:
             st.image(
-                render_preview_with_pymupdf(tpl_pdf.getvalue(), st.session_state["fields_df"], record_body, 2.0),
+                render_preview_with_pymupdf(body_src, st.session_state["fields_df"], record_body, 2.0),
                 caption=f"Body — {get_record_display(record_body)}",
                 use_container_width=True,
             )
             st.caption("Body: หน่วย X/Y = จุด (pt) — มุมซ้ายบนคือ (0,0)")
         else:
-            st.info("อัปโหลด Template PDF ของ Body ก่อน")
+            st.info("อัปโหลด Template PDF ของ Body หรือให้ระบบโหลดค่าเริ่มต้นจาก GitHub (ตรวจสอบเครือข่าย)")
     else:  # Cover
+        if st.session_state.get("cover_toggle_cached", None) is None:
+            st.session_state["cover_toggle_cached"] = True  # noop placeholder
         if cover_active:
-            if tpl_cover_pdf is not None:
+            cover_src = tpl_cover_pdf.getvalue() if tpl_cover_pdf is not None else default_cover_bytes
+            if cover_src is not None:
                 st.image(
-                    render_preview_with_pymupdf(tpl_cover_pdf.getvalue(), st.session_state["cover_fields_df"], record_cover, 2.0),
+                    render_preview_with_pymupdf(cover_src, st.session_state["cover_fields_df"], record_cover, 2.0),
                     caption=f"Cover — ใช้ข้อมูลแถวที่ 0 (แถวแรก) — {get_record_display(record_cover)}",
                     use_container_width=True,
                 )
                 st.caption("Cover: หน่วย X/Y = จุด (pt) — มุมซ้ายบนคือ (0,0) • ใช้ข้อมูลจากแถวที่ 0 เสมอ")
             else:
-                st.info("เปิด Active ปก แล้ว—อัปโหลด Cover Template PDF")
+                st.info("เปิด Active ปก แล้ว—อัปโหลด Cover Template PDF หรือให้ระบบโหลดค่าเริ่มต้นจาก GitHub (ตรวจสอบเครือข่าย)")
         else:
             st.info("ยังไม่ได้เปิด Active ปก (หน้าแรกครั้งเดียว)")
 except Exception as e:
     st.error(f"พรีวิวผิดพลาด: {e}")
 
 st.divider()
-st.subheader("📦 ส่งออก PDF ทั้งชุด")
+st.subheader("📦 ส่งออก PDF ทั้งชุด (ปกหน้าแรก 1 ครั้ง + Body 1 หน้า/คน)")
 
 if st.button("🚀 Export PDF"):
     try:
-        if tpl_pdf is None:
-            st.error("กรุณาอัปโหลด Template PDF ของ Body ก่อน")
+        body_src = tpl_pdf.getvalue() if tpl_pdf is not None else default_body_bytes
+        if body_src is None:
+            st.error("ไม่มี Template PDF ของ Body (อัปโหลดหรือให้ระบบโหลดค่าเริ่มต้นจาก GitHub)")
         else:
-            body_tpl_bytes = tpl_pdf.getvalue()
             out = fitz.open()
 
             # Insert global cover once using row 0
-            if cover_active and (tpl_cover_pdf is not None):
-                t_cover = fitz.open(stream=tpl_cover_pdf.getvalue(), filetype="pdf")
-                out.insert_pdf(t_cover, from_page=0, to_page=0)
-                page0 = out[-1]
-                # Overlay cover fields with row 0
-                for _, row in st.session_state["cover_fields_df"].iterrows():
-                    if not row["active"]:
-                        continue
-                    key = row["field_key"]
-                    if key not in record_cover or pd.isna(record_cover[key]):
-                        continue
-                    text = apply_transform(record_cover[key], row["transform"])
-                    x, y = float(row["x"]), float(row["y"])
-                    font = row.get("font", "helv"); size = float(row.get("size", 12))
-                    try:
-                        page0.insert_text((x, y), str(text), fontname=font if font in STD_FONTS else "helv",
-                                          fontsize=size, color=(0,0,0))
-                    except Exception:
-                        page0.insert_text((x, y), str(text), fontname="helv", fontsize=size, color=(0,0,0))
-                t_cover.close()
+            if cover_active:
+                cover_src = tpl_cover_pdf.getvalue() if tpl_cover_pdf is not None else default_cover_bytes
+                if cover_src is not None:
+                    t_cover = fitz.open(stream=cover_src, filetype="pdf")
+                    out.insert_pdf(t_cover, from_page=0, to_page=0)
+                    page0 = out[-1]
+                    # Overlay cover fields with row 0
+                    for _, row in st.session_state["cover_fields_df"].iterrows():
+                        if not row["active"]:
+                            continue
+                        key = row["field_key"]
+                        if key not in record_cover or pd.isna(record_cover[key]):
+                            continue
+                        text = apply_transform(record_cover[key], row["transform"])
+                        x, y = float(row["x"]), float(row["y"])
+                        font = row.get("font", "helv"); size = float(row.get("size", 12))
+                        try:
+                            page0.insert_text((x, y), str(text), fontname=font if font in STD_FONTS else "helv",
+                                              fontsize=size, color=(0,0,0))
+                        except Exception:
+                            page0.insert_text((x, y), str(text), fontname="helv", fontsize=size, color=(0,0,0))
+                    t_cover.close()
+                else:
+                    st.warning("ไม่พบ Cover Template — จะข้ามหน้า Cover")
 
             # Insert body pages per student
             for _, rec in active_df.iterrows():
-                t_body = fitz.open(stream=body_tpl_bytes, filetype="pdf")
+                t_body = fitz.open(stream=body_src, filetype="pdf")
                 out.insert_pdf(t_body, from_page=0, to_page=0)
                 page = out[-1]
                 for _, row in st.session_state["fields_df"].iterrows():
@@ -452,7 +501,7 @@ if st.button("🚀 Export PDF"):
                 t_body.close()
 
             pdf_bytes = out.tobytes(); out.close()
-            total_pages = len(active_df) + (1 if (cover_active and tpl_cover_pdf is not None) else 0)
+            total_pages = len(active_df) + (1 if (cover_active and (tpl_cover_pdf is not None or default_cover_bytes is not None)) else 0)
             st.success(f"เสร็จแล้ว: {total_pages} หน้า (ปก 1 + เนื้อหา {len(active_df)})")
             st.download_button("⬇️ ดาวน์โหลด PDF", data=pdf_bytes,
                                file_name="exported_batch_with_global_cover.pdf", mime="application/pdf")
@@ -460,4 +509,4 @@ if st.button("🚀 Export PDF"):
         st.error(f"ส่งออกไม่สำเร็จ: {e}")
 
 st.markdown("---")
-# st.caption("รับ CSV เดียวคอลัมน์: No, Student ID, Name, Semester 1, Semester 2, Total, Rating, Grade, Year • Preset รวม Body/Cover (บันทึก data_row_index=0) • รองรับไฟล์ PDF เท่านั้น • ใช้ use_container_width เสมอ")
+st.caption("รับ CSV เดียวคอลัมน์: No, Student ID, Name, Semester 1, Semester 2, Total, Rating, Grade, Year • Preset รวม Body/Cover (data_row_index=0) • รองรับไฟล์ PDF เท่านั้น • ถ้าไม่อัปโหลดจะโหลดเทมเพลตจาก GitHub อัตโนมัติ")
