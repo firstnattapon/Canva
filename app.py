@@ -3,14 +3,14 @@
 # Streamlit App: PDF Template Overlay + CSV -> Batch PDF Export (PDF-only)
 # Update:
 #   ✅ แสดงสถานะชัดเจนเมื่อโหลดเทมเพลตจาก GitHub อัตโนมัติ (Body/Cover)
-#   ✅ นำเข้า Preset (.json) จาก GitHub (raw) อัตโนมัติถ้าไม่อัปโหลด พร้อม URL ให้แก้ได้
+#   ✅ นำเข้า Preset (.json) จาก GitHub อัตโนมัติถ้าไม่อัปโหลด พร้อม URL ให้แก้ได้
 #   ✅ CSV เดียว (No, Student ID, Name, Semester 1, Semester 2, Total, Rating, Grade, Year)
 #   ✅ Cover ใช้ข้อมูล "แถว 0 เสมอ"
 #   ✅ Preset รวมไฟล์เดียว (Body + Cover) — บันทึก data_row_index=0 เสมอ
 #   ✅ พรีวิวสด — ใช้ use_container_width
-#   ✅ CSV Auto-load จาก GitHub (เหมือน Body/Cover) + แสดงสถานะ
-#   ✅ Preset (.json) Auto-load จาก GitHub แบบเดียวกับ Body/Cover/CSV + สถานะ
-#   ✅ รองรับการจัดตำแหน่ง Align (left/center/right) ด้วยการคำนวณความกว้างข้อความ
+#   ✅ CSV Auto-load จาก GitHub + แสดงสถานะ
+#   ✅ Preset Auto-load จาก GitHub + แสดงสถานะ
+#   ✅ Align ซ้าย/กลาง/ขวา ด้วยการวัดความกว้างข้อความแบบ compatible (ทุกเวอร์ชัน PyMuPDF)
 #
 # Install deps:
 #   pip install streamlit pandas pillow pymupdf requests
@@ -33,11 +33,11 @@ except Exception:
 from PIL import Image  # used to render pixmap previews
 
 # ------------------ Default URLs ------------------
-DEFAULT_COVER_URL = "https://github.com/firstnattapon/Canva/blob/main/Cover.pdf"
-DEFAULT_BODY_URL  = "https://github.com/firstnattapon/Canva/blob/main/Template.pdf"
-# ✅ ใช้ลิงก์หน้าเว็บก็ได้ เดี๋ยวแปลงเป็น raw ให้อัตโนมัติ
+# ใส่ลิงก์หน้าเว็บ GitHub ก็ได้ เดี๋ยวแปลงเป็น raw ให้อัตโนมัติ
+DEFAULT_COVER_URL  = "https://github.com/firstnattapon/Canva/blob/main/Cover.pdf"
+DEFAULT_BODY_URL   = "https://github.com/firstnattapon/Canva/blob/main/Template.pdf"
 DEFAULT_PRESET_URL = "https://github.com/firstnattapon/Canva/blob/main/layout_preset.json"
-DEFAULT_CSV_URL = "https://github.com/firstnattapon/Canva/blob/main/Data.csv"
+DEFAULT_CSV_URL    = "https://github.com/firstnattapon/Canva/blob/main/Data.csv"
 
 # ------------------ Canonical columns & defaults ------------------
 CANONICAL_COLS = {
@@ -239,16 +239,35 @@ def get_record_display(rec: pd.Series, key_cols=("student_id", "name")) -> str:
             parts.append(str(rec[k]))
     return " • ".join(parts) if parts else "(no id / name)"
 
-def _aligned_xy(page, text: str, x: float, y: float, font: str, size: float, align: str):
-    """Return (x_adj, y) after applying align using text width."""
+# ---------- Measurement compatible with all PyMuPDF versions ----------
+
+def _measure_text_width(page, text: str, font: str, size: float) -> float:
+    """Compatible width calc: Page.get_text_length (new) -> Font.text_length (fallback)."""
+    # 1) PyMuPDF รุ่นใหม่
+    if hasattr(page, "get_text_length"):
+        try:
+            return page.get_text_length(
+                text,
+                fontname=font if font in STD_FONTS else "helv",
+                fontsize=size,
+            )
+        except Exception:
+            pass
+    # 2) Fallback: ใช้ fitz.Font คำนวณ
     try:
-        width = page.get_text_length(text, fontname=font if font in STD_FONTS else "helv", fontsize=size)
+        f = fitz.Font(fontname=font if font in STD_FONTS else "helv")
+        return f.text_length(text, fontsize=size)
     except Exception:
-        width = page.get_text_length(text, fontname="helv", fontsize=size)
+        # 3) สำรองสุดท้ายแบบประมาณการ
+        return 0.6 * size * max(len(text), 0)
+
+def _aligned_xy(page, text: str, x: float, y: float, font: str, size: float, align: str):
+    """คืนค่า (x_adj, y) ตาม align โดยวัดความกว้างข้อความแบบ compatible ทุกเวอร์ชัน."""
+    w = _measure_text_width(page, text, font, size)
     if align == "center":
-        return x - width / 2.0, y
+        return x - w / 2.0, y
     if align == "right":
-        return x - width, y
+        return x - w, y
     return x, y
 
 def render_preview_with_pymupdf(template_bytes: bytes, fields_df: pd.DataFrame,
@@ -312,12 +331,9 @@ with st.sidebar:
 default_body_bytes = None
 default_cover_bytes = None
 default_csv_bytes = None
-default_preset_bytes = None  # ✅ NEW
-
 body_source = "uploaded" if tpl_pdf is not None else "github"
 cover_source = "uploaded" if tpl_cover_pdf is not None else "github"
 csv_source = "uploaded" if csv_main is not None else "github"
-preset_source = "github"  # จะอัปเดตตามการกระทำด้านล่าง
 
 if tpl_pdf is None:
     default_body_bytes = fetch_default_pdf(DEFAULT_BODY_URL)
@@ -440,6 +456,7 @@ with colR:
                 except Exception as e:
                     st.error(f"อ่านไฟล์/URL Preset ไม่ได้: {e}")
 
+            preset_source = "unknown"
             if preset_json is not None:
                 _apply_unified_preset_bytes(preset_json.read(), "uploaded")
                 preset_source = "uploaded"
@@ -476,13 +493,14 @@ with colR:
 
     # ✅ แสดงสถานะ Preset เหมือน Body/Cover/CSV
     st.subheader("🔔 สถานะ Preset (.json)")
-    if preset_source == "uploaded":
-        st.success("Preset: ใช้ไฟล์ที่อัปโหลด")
-    elif preset_source == "github":
-        used = st.session_state.get("preset_url_used", to_raw_github(DEFAULT_PRESET_URL))
-        st.info(f"Preset: โหลดจาก GitHub อัตโนมัติ\n{used}")
+    if st.session_state.get("preset_loaded", False):
+        src = st.session_state.get("preset_url_used") or "uploaded"
+        if src == "uploaded":
+            st.success("Preset: ใช้ไฟล์ที่อัปโหลด")
+        else:
+            st.info(f"Preset: โหลดจาก GitHub อัตโนมัติ\n{src}")
     else:
-        st.error("Preset: ไม่พบทั้งไฟล์อัปโหลดและค่าเริ่มต้นจาก GitHub")
+        st.warning("Preset: ยังไม่พบ (ระบบพยายามโหลดอัตโนมัติจาก GitHub)")
 
     # Tabs for editing
     tab_body, tab_cover = st.tabs(["⚙️ Body Layout", "⚙️ Cover Layout"])
