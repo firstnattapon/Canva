@@ -271,7 +271,7 @@ with st.sidebar:
     tpl_pdf = st.file_uploader("Template PDF (Body)", type=["pdf"])
 
     st.header("🧾 เทมเพลต — ปก (PDF เท่านั้น)")
-    cover_active = st.checkbox("Active ปก (หน้าแรกเสมอ; ไม่ต่อคน)", value=False)
+    cover_active = st.checkbox("Active ปก", value=True)
     tpl_cover_pdf = st.file_uploader("Cover Template PDF", type=["pdf"])
 
     st.header("📥 ข้อมูล (CSV เดียว)")
@@ -298,7 +298,7 @@ with c1:
     if body_source == "uploaded":
         st.success("Body Template: ใช้ไฟล์ที่อัปโหลด")
     elif body_source == "github":
-        st.info(f"Body Template: โหลดจาก GitHub อัตโนมัติ\n{to_raw_github(DEFAULT_BODY_URL)}")
+        st.info(f"Template: โหลดจาก อัตโนมัติ}")
     else:
         st.error("Body Template: ไม่พบทั้งไฟล์อัปโหลดและค่าเริ่มต้นจาก GitHub")
 with c2:
@@ -308,7 +308,7 @@ with c2:
         if cover_source == "uploaded":
             st.success("Cover Template: ใช้ไฟล์ที่อัปโหลด")
         elif cover_source == "github":
-            st.info(f"Cover Template: โหลดจาก GitHub อัตโนมัติ\n{to_raw_github(DEFAULT_COVER_URL)}")
+            st.info(f"Cover Template: โหลดจาก  อัตโนมัติ}")
         else:
             st.error("Cover Template: ไม่พบทั้งไฟล์อัปโหลดและค่าเริ่มต้นจาก GitHub")
 
