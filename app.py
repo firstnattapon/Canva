@@ -308,7 +308,7 @@ with c2:
         if cover_source == "uploaded":
             st.success("Cover Template: ใช้ไฟล์ที่อัปโหลด")
         elif cover_source == "github":
-            st.info(f"Cover Template: โหลดจาก  อัตโนมัติ}")
+            st.info(f"Cover Template: โหลดจาก  อัตโนมัติ")
         else:
             st.error("Cover Template: ไม่พบทั้งไฟล์อัปโหลดและค่าเริ่มต้นจาก GitHub")
 
