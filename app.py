@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 # Streamlit app: พรีวิว PDF แบบ Real-time ปรับ X/Y แล้วเห็นผลสด
 # 1 หน้า/นักเรียน 1 คน, รองรับ CSV เทอมเดียวหรือสองเทอม, ใส่ Total(50) ลงเทมเพลต Canva
+# แก้ปัญหาตัวหนังสือซ้อนกัน ด้วยการวาด "พื้นขาว" ใต้ข้อความแบบไดนามิก
 
 import io
 import base64
@@ -10,7 +11,7 @@ import pandas as pd
 
 st.set_page_config(page_title="Conversation → PDF (Realtime Preview)", layout="wide")
 st.title("📄 Conversation Result → PDF (Realtime X/Y Preview)")
-st.caption("อัปโหลดเทมเพลต PDF (Canva หน้าเดียว) + CSV เทอม 1/2 → พิมพ์ค่า Total ลงช่องที่เว้นไว้ • พรีวิวสดเมื่อปรับ X/Y")
+st.caption("อัปโหลด Template PDF (Canva หน้าเดียว) + CSV เทอม 1/2 → พิมพ์ค่า Total ลงช่องที่เว้นไว้ • พรีวิวสด • กันซ้อนด้วยพื้นขาว")
 
 # ========= Sidebar controls =========
 st.sidebar.header("🔧 ตำแหน่งข้อความ (หน่วย pt)")
@@ -31,11 +32,17 @@ st.sidebar.header("🧭 ระบบแกน Y")
 top_left_mode = st.sidebar.checkbox("ใช้ Y แบบจากด้านบนลงล่าง (Top-Left Origin)", value=False)
 st.sidebar.caption("ปกติ PDF ใช้มุมล่างซ้ายเป็นจุดกำเนิด (y เพิ่มขึ้น = ขึ้นด้านบน). ถ้าติ๊กตัวนี้ y จะวัดจากด้านบนลงล่างแทน")
 
+st.sidebar.header("🧻 กันซ้อน (White-out)")
+whiteout = st.sidebar.checkbox("วาดพื้นขาวใต้ข้อความ (กันซ้อน)", value=True)
+pad_x = st.sidebar.number_input("Padding X (pt)", 0, 40, 4, 1)
+pad_y = st.sidebar.number_input("Padding Y (pt)", 0, 40, 2, 1)
+st.sidebar.caption("พื้นขาวจะครอบพื้นที่ตัวหนังสืออัตโนมัติตามความยาวข้อความ + padding")
+
 st.sidebar.header("🔗 การแม็ปข้อมูล")
 join_key = st.sidebar.selectbox("คีย์จับคู่ 2 เทอม", ["Student ID", "Name - Surname"], index=0)
 when_single = st.sidebar.selectbox("ถ้าอัปโหลด CSV เทอมเดียว ให้ใส่ลงช่อง", ["S1", "S2"], index=0)
 
-st.sidebar.header("🔤 ฟอนต์ไทย (ตัวเลือก)")
+st.sidebar.header("🔤 ฟอนต์ไทย (ทางเลือก)")
 font_file = st.sidebar.file_uploader("อัปโหลด .ttf/.otf (สำหรับข้อความไทย/ฟอนต์เฉพาะ)", type=["ttf","otf"])
 font_bytes = font_file.getvalue() if font_file else None
 
@@ -83,7 +90,7 @@ def parse_csv_bytes(b: bytes) -> pd.DataFrame | None:
     cols = [c for c in df.columns if c in REQUIRED_COLS]
     df = df[cols]
     if "No" in df.columns:
-        # >>> แก้จุดพัง: ใช้ .str.strip() แทน .strip()
+        # ใช้ .str.strip() เสมอเมื่อจัดการ Series
         mask_score = df["No"].astype(str).str.strip().str.lower().eq("score")
         df = df[~mask_score]
         df = df[df["No"].astype(str).str.strip() != ""]
@@ -131,16 +138,17 @@ def build_one_page_overlay_pdf(page_w: float, page_h: float,
                                font_size: float, bold: bool,
                                name_xy, id_xy, s1_xy, s2_xy,
                                top_left_mode: bool,
-                               font_bytes: bytes | None) -> bytes:
+                               font_bytes: bytes | None,
+                               whiteout: bool, pad_x: float, pad_y: float) -> bytes:
     from reportlab.pdfgen import canvas
-    from reportlab.lib.colors import black
+    from reportlab.lib.colors import black, white
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.ttfonts import TTFont
 
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=(page_w, page_h))
-    c.setFillColor(black)
 
+    # ฟอนต์
     fontname = "Helvetica-Bold" if bold else "Helvetica"
     if font_bytes:
         try:
@@ -154,13 +162,30 @@ def build_one_page_overlay_pdf(page_w: float, page_h: float,
         s = "" if text is None else str(text).strip()
         if not s:
             return
-        yy = (page_h - y) if top_left_mode else y
+        yy = (page_h - y) if top_left_mode else y  # แปลงแกนถ้าจำเป็น
+
+        if whiteout:
+            # คำนวณความกว้างข้อความ → วาดสี่เหลี่ยมพื้นขาว + padding
+            try:
+                from reportlab.pdfbase.pdfmetrics import stringWidth
+                tw = stringWidth(s, fontname, float(font_size))
+            except Exception:
+                tw = len(s) * (font_size * 0.55)  # fallback ประมาณการ
+            rect_x = float(x) - float(pad_x)
+            rect_y = float(yy) - float(pad_y)
+            rect_w = float(tw) + float(pad_x) * 2.0
+            rect_h = float(font_size) + float(pad_y) * 2.0
+            c.setFillColor(white)
+            c.rect(rect_x, rect_y, rect_w, rect_h, fill=1, stroke=0)
+            c.setFillColor(black)
+
+        # วาดตัวอักษร
         c.drawString(float(x), float(yy), s)
 
-    x, y = name_xy; put(x, y, name)
-    x, y = id_xy;   put(x, y, sid)
-    x, y = s1_xy;   put(x, y, total_s1)
-    x, y = s2_xy;   put(x, y, total_s2)
+    put(name_xy[0], name_xy[1], name)
+    put(id_xy[0],   id_xy[1],   sid)
+    put(s1_xy[0],   s1_xy[1],   total_s1)
+    put(s2_xy[0],   s2_xy[1],   total_s2)
 
     c.showPage(); c.save()
     return buf.getvalue()
@@ -173,7 +198,7 @@ def merge_overlay_on_template(template_pdf_bytes: bytes, overlay_pdf_bytes_list:
         base_page = tpl_reader.pages[0]
         ov_reader = PdfReader(io.BytesIO(ov_bytes))
         ov_page = ov_reader.pages[0]
-        base_page.merge_page(ov_page)
+        base_page.merge_page(ov_page)  # วางทับด้วยพื้นขาวรองแล้วค่อยตัวหนังสือ
         writer.add_page(base_page)
     out = io.BytesIO()
     writer.write(out); out.seek(0)
@@ -183,7 +208,8 @@ def make_preview_pdf(template_pdf_bytes: bytes, rec: dict,
                      font_size: float, bold: bool,
                      name_xy, id_xy, s1_xy, s2_xy,
                      top_left_mode: bool,
-                     font_bytes: bytes | None) -> bytes:
+                     font_bytes: bytes | None,
+                     whiteout: bool, pad_x: float, pad_y: float) -> bytes:
     from pypdf import PdfReader
     reader = PdfReader(io.BytesIO(template_pdf_bytes))
     pg = reader.pages[0]
@@ -195,7 +221,8 @@ def make_preview_pdf(template_pdf_bytes: bytes, rec: dict,
         font_size, bold,
         name_xy, id_xy, s1_xy, s2_xy,
         top_left_mode,
-        font_bytes
+        font_bytes,
+        whiteout, pad_x, pad_y
     )
     return merge_overlay_on_template(template_pdf_bytes, [overlay])
 
@@ -203,7 +230,8 @@ def make_full_pdf(template_pdf_bytes: bytes, records: pd.DataFrame,
                   font_size: float, bold: bool,
                   name_xy, id_xy, s1_xy, s2_xy,
                   top_left_mode: bool,
-                  font_bytes: bytes | None) -> bytes:
+                  font_bytes: bytes | None,
+                  whiteout: bool, pad_x: float, pad_y: float) -> bytes:
     from pypdf import PdfReader
     reader = PdfReader(io.BytesIO(template_pdf_bytes))
     pg = reader.pages[0]
@@ -217,13 +245,14 @@ def make_full_pdf(template_pdf_bytes: bytes, records: pd.DataFrame,
             font_size, bold,
             name_xy, id_xy, s1_xy, s2_xy,
             top_left_mode,
-            font_bytes
+            font_bytes,
+            whiteout, pad_x, pad_y
         ))
     return merge_overlay_on_template(template_pdf_bytes, overlays)
 
 # ========= Preview renderers =========
-def render_preview_as_image(pdf_bytes: bytes, zoom_dpi: int = 150):
-    """ใช้ PyMuPDF (ถ้ามี) เรนเดอร์หน้าแรกเป็น PNG แล้วโชว์"""
+def render_preview_as_image(pdf_bytes: bytes, zoom_dpi: int = 160):
+    """ใช้ PyMuPDF (ถ้ามี) เรนเดอร์หน้าแรกเป็น PNG แล้วโชว์ → ไม่โดนบล็อก iframe"""
     spec = importlib.util.find_spec("pymupdf")
     if spec is None:
         return False
@@ -235,7 +264,7 @@ def render_preview_as_image(pdf_bytes: bytes, zoom_dpi: int = 150):
     return True
 
 def render_preview_as_pdf(pdf_bytes: bytes, height: int = 820):
-    """ใช้ st.pdf ถ้ามี (Streamlit ใหม่), ถ้าไม่มีก็ fallback data: URL iframe"""
+    """ถ้าไม่มี PyMuPDF → ใช้ st.pdf (Streamlit ใหม่) หรือ fallback data:URL"""
     if hasattr(st, "pdf"):
         st.pdf(pdf_bytes, height=height)
         return
@@ -296,7 +325,8 @@ with right:
             font_size, bold,
             (name_x, name_y), (id_x, id_y), (s1_x, s1_y), (s2_x, s2_y),
             top_left_mode,
-            font_bytes
+            font_bytes,
+            whiteout, pad_x, pad_y
         )
         shown = render_preview_as_image(preview_pdf, zoom_dpi=st.sidebar.slider("Preview DPI", 120, 220, 160, 10))
         if not shown:
@@ -315,7 +345,8 @@ if st.button("Export ทั้งชุด", type="primary"):
                 font_size, bold,
                 (name_x, name_y), (id_x, id_y), (s1_x, s1_y), (s2_x, s2_y),
                 top_left_mode,
-                font_bytes
+                font_bytes,
+                whiteout, pad_x, pad_y
             )
             st.success("สำเร็จ! ดาวน์โหลดได้เลย")
             st.download_button("⬇️ ดาวน์โหลดไฟล์รวม (PDF)", full_pdf, file_name="Conversation_PerStudent_Output.pdf")
