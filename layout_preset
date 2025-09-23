@@ -3,21 +3,10 @@
   "body": {
     "fields": [
       {
-        "field_key": "No",
-        "label": "no",
+        "field_key": "no",
+        "label": "No",
         "active": true,
-        "x": 200.0,
-        "y": 160.0,
-        "font": "helv",
-        "size": 14,
-        "transform": "title",
-        "align": "left"
-      },
-      {
-        "field_key": "student_id",
-        "label": "Student ID",
-        "active": true,
-        "x": 311.0,
+        "x": 226.0,
         "y": 209.0,
         "font": "times",
         "size": 12,
@@ -28,8 +17,19 @@
         "field_key": "name",
         "label": "Name",
         "active": true,
-        "x": 250.0,
-        "y": 226.0,
+        "x": 266.0,
+        "y": 227.0,
+        "font": "times",
+        "size": 12,
+        "transform": "none",
+        "align": "left"
+      },
+      {
+        "field_key": "student_id",
+        "label": "Student ID",
+        "active": true,
+        "x": 308.0,
+        "y": 209.0,
         "font": "times",
         "size": 12,
         "transform": "none",
@@ -76,27 +76,27 @@
         "y": 190.0,
         "font": "helv",
         "size": 12,
-        "transform": "upper",
+        "transform": "none",
         "align": "left"
       },
       {
         "field_key": "grade",
         "label": "Grade",
-        "active": false,
-        "x": 520.0,
-        "y": 190.0,
-        "font": "helv",
+        "active": true,
+        "x": 382.0,
+        "y": 209.0,
+        "font": "times",
         "size": 12,
-        "transform": "upper",
+        "transform": "none",
         "align": "left"
       },
       {
         "field_key": "year",
         "label": "Year",
-        "active": false,
-        "x": 640.0,
-        "y": 190.0,
-        "font": "helv",
+        "active": true,
+        "x": 370.0,
+        "y": 245.0,
+        "font": "times",
         "size": 12,
         "transform": "none",
         "align": "left"
@@ -106,14 +106,14 @@
   "cover": {
     "fields": [
       {
-        "field_key": "student_id",
-        "label": "Student ID",
+        "field_key": "no",
+        "label": "No",
         "active": false,
-        "x": 220.0,
-        "y": 292.0,
+        "x": 140.0,
+        "y": 160.0,
         "font": "helv",
-        "size": 16,
-        "transform": "none",
+        "size": 14,
+        "transform": "title",
         "align": "left"
       },
       {
@@ -128,11 +128,33 @@
         "align": "left"
       },
       {
+        "field_key": "student_id",
+        "label": "Student ID",
+        "active": false,
+        "x": 220.0,
+        "y": 292.0,
+        "font": "helv",
+        "size": 16,
+        "transform": "none",
+        "align": "left"
+      },
+      {
+        "field_key": "year",
+        "label": "Year",
+        "active": true,
+        "x": 384.0,
+        "y": 436.0,
+        "font": "times",
+        "size": 16,
+        "transform": "none",
+        "align": "left"
+      },
+      {
         "field_key": "sem1",
         "label": "Semester 1",
         "active": false,
         "x": 420.0,
-        "y": 260.0,
+        "y": 100.0,
         "font": "helv",
         "size": 16,
         "transform": "none",
@@ -175,21 +197,10 @@
         "field_key": "grade",
         "label": "Grade",
         "active": true,
-        "x": 620.0,
-        "y": 292.0,
-        "font": "helv",
+        "x": 309.0,
+        "y": 407.0,
+        "font": "times",
         "size": 16,
-        "transform": "upper",
-        "align": "left"
-      },
-      {
-        "field_key": "year",
-        "label": "Year",
-        "active": true,
-        "x": 220.0,
-        "y": 324.0,
-        "font": "helv",
-        "size": 14,
         "transform": "none",
         "align": "left"
       }
