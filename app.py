@@ -186,7 +186,6 @@ def render_preview_with_pymupdf(template_bytes: bytes, fields_df: pd.DataFrame,
 
     mat = fitz.Matrix(scale, scale)
     pix = p.get_pixmap(matrix=mat, alpha=False)
-    from PIL import Image
     img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
     td.close(); newdoc.close()
     return img
@@ -231,9 +230,7 @@ with st.sidebar:
     tpl_cover_img = st.file_uploader("หรือภาพ (PNG/JPG) Cover", type=["png", "jpg", "jpeg"])
 
     if (tpl_pdf is not None or tpl_cover_pdf is not None) and fitz is None:
-        st.warning("ติดตั้ง `pymupdf` เพื่อพรีวิว/ส่งออกจาก PDF
-
-`pip install pymupdf`")
+        st.warning("ติดตั้ง `pymupdf` เพื่อพรีวิว/ส่งออกจาก PDF\n\n`pip install pymupdf`")
 
     st.header("📥 ข้อมูลนักเรียน")
     csv_t1 = st.file_uploader("CSV เทอม 1", type=["csv", "xlsx", "xls"])
@@ -405,7 +402,6 @@ with colR:
                     td = fitz.open(stream=tpl_cover_pdf.getvalue(), filetype="pdf")
                     newdoc = fitz.open(); newdoc.insert_pdf(td, from_page=0, to_page=0)
                     p = newdoc[0]; mat = fitz.Matrix(2,2); pix = p.get_pixmap(matrix=mat, alpha=False)
-                    from PIL import Image
                     img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
                     st.image(img, caption="Cover — template preview (ไม่วางข้อมูลนักเรียน)", use_column_width=True)
                     td.close(); newdoc.close()
