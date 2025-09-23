@@ -1,11 +1,17 @@
 # -*- coding: utf-8 -*-
 # =============================================================
 # Streamlit App: PDF Template Overlay + CSV -> Batch PDF Export (PDF-only)
-# Update (สำคัญรอบนี้):
-#   ✅ Body Layout sync อัตโนมัติกับคอลัมน์ของ 📚 ข้อมูล (preview) เมื่อ CSV/Preset เปลี่ยน
-#   ✅ ปุ่ม 🔄 Sync Body Layout / 🔄 Sync Cover Layout
-#   ✅ ครอบคลุม get_text_length ทุกเวอร์ชัน PyMuPDF (fallback font.text_length)
-#   ✅ Preset/CSV/Template โหลดอัตโนมัติจาก GitHub (ลิงก์หน้าเว็บก็ได้)
+# Update:
+#   ✅ แสดงสถานะชัดเจนเมื่อโหลดเทมเพลตจาก GitHub อัตโนมัติ (Body/Cover)
+#   ✅ นำเข้า Preset (.json) จาก GitHub อัตโนมัติถ้าไม่อัปโหลด พร้อม URL ให้แก้ได้
+#   ✅ CSV เดียว (No, Student ID, Name, Semester 1, Semester 2, Total, Rating, Grade, Year)
+#   ✅ Cover ใช้ข้อมูล "แถว 0 เสมอ"
+#   ✅ Preset รวมไฟล์เดียว (Body + Cover) — บันทึก data_row_index=0 เสมอ
+#   ✅ พรีวิวสด — ใช้ use_container_width
+#   ✅ CSV Auto-load จาก GitHub + แสดงสถานะ
+#   ✅ Preset Auto-load จาก GitHub + แสดงสถานะ
+#   ✅ Align ซ้าย/กลาง/ขวา ด้วยการวัดความกว้างข้อความแบบ compatible (ทุกเวอร์ชัน PyMuPDF)
+#   ✅ Auto-Sync: เปลี่ยน CSV → อัปเดต 1) 📚 ข้อมูล (preview)  2) ⚙️ Body Layout  3) ⚙️ Cover Layout
 #
 # Install deps:
 #   pip install streamlit pandas pillow pymupdf requests
@@ -28,6 +34,7 @@ except Exception:
 from PIL import Image  # used to render pixmap previews
 
 # ------------------ Default URLs ------------------
+# ใส่ลิงก์หน้าเว็บ GitHub ก็ได้ เดี๋ยวแปลงเป็น raw ให้อัตโนมัติ
 DEFAULT_COVER_URL  = "https://github.com/firstnattapon/Canva/blob/main/Cover.pdf"
 DEFAULT_BODY_URL   = "https://github.com/firstnattapon/Canva/blob/main/Template.pdf"
 DEFAULT_PRESET_URL = "https://github.com/firstnattapon/Canva/blob/main/layout_preset.json"
@@ -103,6 +110,7 @@ def fetch_default_pdf(url: str) -> Optional[bytes]:
 
 @st.cache_data(show_spinner=False, ttl=3600)
 def fetch_default_json(url: str) -> Optional[bytes]:
+    """Fetch JSON bytes from GitHub (supports normal or raw URLs)."""
     try:
         raw_url = to_raw_github(url)
         resp = requests.get(raw_url, timeout=10)
@@ -114,6 +122,7 @@ def fetch_default_json(url: str) -> Optional[bytes]:
 
 @st.cache_data(show_spinner=False, ttl=3600)
 def fetch_default_csv(url: str) -> Optional[bytes]:
+    """Fetch CSV bytes from GitHub (supports normal or raw URLs)."""
     try:
         raw_url = to_raw_github(url)
         resp = requests.get(raw_url, timeout=10)
@@ -124,6 +133,7 @@ def fetch_default_csv(url: str) -> Optional[bytes]:
         return None
 
 def read_csv_bytes(b: bytes) -> pd.DataFrame:
+    """Read CSV bytes into DataFrame with BOM fallback + header trim."""
     try:
         df = pd.read_csv(io.BytesIO(b))
     except UnicodeDecodeError:
@@ -132,6 +142,7 @@ def read_csv_bytes(b: bytes) -> pd.DataFrame:
     return df
 
 def try_read_table(uploaded_file) -> pd.DataFrame:
+    """Read CSV/Excel into DataFrame and normalize header whitespace."""
     if uploaded_file is None:
         return pd.DataFrame()
     name = uploaded_file.name.lower()
@@ -229,79 +240,33 @@ def get_record_display(rec: pd.Series, key_cols=("student_id", "name")) -> str:
             parts.append(str(rec[k]))
     return " • ".join(parts) if parts else "(no id / name)"
 
-# ---------- NEW: Sync helpers (ทำให้ Layout = Columns เสมอ) ----------
-
-def _defaults_map(defaults):
-    m = {}
-    for k, label, active, x, y, font, size, transform, align in defaults:
-        m[k] = {"label": label, "active": active, "x": x, "y": y, "font": font,
-                "size": size, "transform": transform, "align": align}
-    return m
-
-def sync_fields_to_columns(old_df: Optional[pd.DataFrame],
-                           columns: List[str],
-                           defaults,
-                           strict_drop_unknown: bool = True) -> pd.DataFrame:
-    """สร้าง fields_df ใหม่ให้ตรงกับ 'columns' พร้อมพยายามคงค่าจัดวางเดิมไว้"""
-    cols = [c for c in columns if c != "no"]
-    old = {} if old_df is None or old_df.empty else {
-        r["field_key"]: r for r in old_df.to_dict(orient="records")
-    }
-    dmap = _defaults_map(defaults)
-
-    rows = []
-    # ใส่ตามลำดับ defaults ก่อน (ถ้ามีในตาราง)
-    default_order_keys = [k for k, *_ in defaults if k in cols]
-    rest_keys = [k for k in cols if k not in default_order_keys]
-
-    for key in default_order_keys + rest_keys:
-        base = {
-            "field_key": key,
-            "label": dmap.get(key, {}).get("label", key.title()),
-            "active": dmap.get(key, {}).get("active", False) if key not in old else old[key].get("active", False),
-            "x": dmap.get(key, {}).get("x", 100.0),
-            "y": dmap.get(key, {}).get("y", 100.0),
-            "font": dmap.get(key, {}).get("font", "helv"),
-            "size": dmap.get(key, {}).get("size", 12),
-            "transform": dmap.get(key, {}).get("transform", "none"),
-            "align": dmap.get(key, {}).get("align", "left"),
-        }
-        if key in old:
-            # รักษาค่าจัดวางเดิม
-            for k2 in ["label","active","x","y","font","size","transform","align"]:
-                if k2 in old[key]:
-                    base[k2] = old[key][k2]
-        # กติกา: บังคับให้ key สำคัญเปิด active ถ้ามีคอลัมน์
-        if key in ["name","student_id","total"]:
-            base["active"] = True if key in cols else base["active"]
-        rows.append(base)
-
-    if not strict_drop_unknown and old:
-        # เก็บของเก่าที่หายไปในคอลัมน์ไว้ (inactive)
-        for key, r in old.items():
-            if key not in [row["field_key"] for row in rows]:
-                r2 = {**r, "active": False}
-                rows.append(r2)
-
-    return pd.DataFrame(rows)
-
 # ---------- Measurement compatible with all PyMuPDF versions ----------
 
 def _measure_text_width(page, text: str, font: str, size: float) -> float:
-    # 1) รุ่นใหม่
+    """Compatible width calc: Page.get_text_length (new) -> Font.text_length (fallback) -> heuristic."""
+    # 1) PyMuPDF รุ่นใหม่
     if hasattr(page, "get_text_length"):
         try:
-            return page.get_text_length(text, fontname=font if font in STD_FONTS else "helv", fontsize=size)
+            return page.get_text_length(
+                text,
+                fontname=font if font in STD_FONTS else "helv",
+                fontsize=size,
+            )
         except Exception:
             pass
-    # 2) Fallback: font metric
+    # 2) Fallback: ใช้ fitz.Font คำนวณ
     try:
         f = fitz.Font(fontname=font if font in STD_FONTS else "helv")
-        return f.text_length(text, fontsize=size)
+        try:
+            return f.text_length(text, fontsize=size)  # ใหม่
+        except TypeError:
+            return f.text_length(text, size)  # บางเวอร์ชัน
     except Exception:
+        # 3) สำรองสุดท้ายแบบประมาณการ
         return 0.6 * size * max(len(text), 0)
 
 def _aligned_xy(page, text: str, x: float, y: float, font: str, size: float, align: str):
+    """คืนค่า (x_adj, y) ตาม align โดยวัดความกว้างข้อความแบบ compatible ทุกเวอร์ชัน."""
     w = _measure_text_width(page, text, font, size)
     if align == "center":
         return x - w / 2.0, y
@@ -343,6 +308,53 @@ def render_preview_with_pymupdf(template_bytes: bytes, fields_df: pd.DataFrame,
     img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
     td.close(); newdoc.close()
     return img
+
+# ---- NEW: auto-sync helpers ----
+def _defaults_to_rowmap(defaults):
+    m = {}
+    for k, label, active, x, y, font, size, transform, align in defaults:
+        m[k] = {
+            "field_key": k, "label": label, "active": bool(active),
+            "x": float(x), "y": float(y), "font": str(font), "size": int(size),
+            "transform": str(transform), "align": str(align)
+        }
+    return m
+
+def reconcile_fields(layout_df: pd.DataFrame, csv_cols: List[str], defaults) -> pd.DataFrame:
+    """
+    ซิงค์แผง Layout (Body/Cover) ให้ตามคอลัมน์ CSV:
+      - คีย์ที่มีอยู่แล้ว: เก็บค่าตำแหน่ง/ฟอนต์เดิม
+      - คีย์ที่เพิ่มใหม่จาก CSV: เติมเข้าไป (ใช้ค่าจาก defaults ถ้ามี, มิเช่นนั้นเป็นค่า generic)
+      - คีย์ที่หายไปจาก CSV: คงไว้แต่ปิด active (กันเผื่อ preset เก่า)
+    """
+    if layout_df is None or layout_df.empty:
+        return build_field_df(csv_cols, defaults)
+
+    existing = {str(r["field_key"]): dict(r) for _, r in layout_df.iterrows()}
+    dmap = _defaults_to_rowmap(defaults)
+
+    rows = []
+    for c in csv_cols:
+        if c == "no":
+            continue
+        if c in existing:
+            rows.append(existing[c])
+        else:
+            base = dmap.get(c, {
+                "field_key": c, "label": c.title(), "active": False,
+                "x": 100.0, "y": 100.0, "font": "helv", "size": 12,
+                "transform": "none", "align": "left"
+            })
+            rows.append(base)
+
+    for k, row in existing.items():
+        if k not in csv_cols and k != "no":
+            row = {**row, "active": False}
+            rows.append(row)
+
+    df_new = pd.DataFrame(rows)
+    want = ["field_key","label","active","x","y","font","size","transform","align"]
+    return df_new[want]
 
 # ------------------ Streamlit UI ------------------
 
@@ -442,13 +454,36 @@ with colL:
     ordered = [c for c in pref if c in df.columns] + [c for c in df.columns if c not in pref]
     active_df = df[ordered]
 
+    # ---- NEW: remember CSV signature & auto-sync layouts ----
+    st.session_state["current_csv_cols"] = ordered
+    csv_sig = tuple(ordered)
+    prev_sig = st.session_state.get("csv_signature")
+
+    if prev_sig != csv_sig:
+        if "fields_df" in st.session_state:
+            st.session_state["fields_df"] = reconcile_fields(
+                st.session_state["fields_df"], ordered, DEFAULT_FIELDS
+            )
+        else:
+            st.session_state["fields_df"] = build_field_df(ordered, DEFAULT_FIELDS)
+
+        if "cover_fields_df" in st.session_state:
+            st.session_state["cover_fields_df"] = reconcile_fields(
+                st.session_state["cover_fields_df"], ordered, DEFAULT_COVER_FIELDS
+            )
+        else:
+            st.session_state["cover_fields_df"] = build_field_df(ordered, DEFAULT_COVER_FIELDS)
+
+        st.session_state["csv_signature"] = csv_sig
+        st.toast("ซิงค์ Layout กับ CSV แล้ว (อัตโนมัติ)", icon="🔄")
+
     st.subheader("📚 ข้อมูล (preview)")
     st.dataframe(active_df.head(12), use_container_width=True)
 
 with colR:
     st.subheader("🧩 Preset (.json)")
 
-    # Init session states
+    # Init session states (หลัง active_df พร้อมแล้ว)
     if "fields_df" not in st.session_state:
         st.session_state["fields_df"] = build_field_df(active_df.columns.tolist(), DEFAULT_FIELDS)
     if "cover_fields_df" not in st.session_state:
@@ -457,10 +492,6 @@ with colR:
         st.session_state["preset_loaded"] = False
     if "preset_url_used" not in st.session_state:
         st.session_state["preset_url_used"] = ""
-    if "_body_cols" not in st.session_state:
-        st.session_state["_body_cols"] = list(active_df.columns)
-    if "_cover_cols" not in st.session_state:
-        st.session_state["_cover_cols"] = list(active_df.columns)
 
     with st.expander("Import / Export", expanded=False):
         col_i, col_e = st.columns(2)
@@ -482,8 +513,15 @@ with colR:
                             st.error(f"Preset JSON ขาดคีย์: {missing}")
                             return
                         st.session_state["fields_df"] = new_df[req]
+                        # ---- NEW: reconcile with current CSV ----
+                        csv_cols = st.session_state.get("current_csv_cols")
+                        if csv_cols:
+                            st.session_state["fields_df"] = reconcile_fields(
+                                st.session_state["fields_df"], csv_cols, DEFAULT_FIELDS
+                            )
                         st.session_state["preset_loaded"] = True
                         st.session_state["preset_url_used"] = source_label
+                        st.info("โหลดเฉพาะ Body (legacy) จาก Preset แล้ว")
                     else:
                         body = raw.get("body", {})
                         cover = raw.get("cover", {})
@@ -491,16 +529,19 @@ with colR:
                             st.session_state["fields_df"] = pd.DataFrame(body["fields"])
                         if "fields" in cover:
                             st.session_state["cover_fields_df"] = pd.DataFrame(cover["fields"])
+                        # ---- NEW: reconcile with current CSV ----
+                        csv_cols = st.session_state.get("current_csv_cols")
+                        if csv_cols:
+                            st.session_state["fields_df"] = reconcile_fields(
+                                st.session_state["fields_df"], csv_cols, DEFAULT_FIELDS
+                            )
+                            st.session_state["cover_fields_df"] = reconcile_fields(
+                                st.session_state["cover_fields_df"], csv_cols, DEFAULT_COVER_FIELDS
+                            )
+                        # data_row_index ถูกบังคับเป็น 0 เสมอ
                         st.session_state["preset_loaded"] = True
                         st.session_state["preset_url_used"] = source_label
-                    # 🔧 หลังโหลด preset → sync ให้เท่าคอลัมน์ตารางเสมอ
-                    st.session_state["fields_df"] = sync_fields_to_columns(
-                        st.session_state["fields_df"], list(active_df.columns), DEFAULT_FIELDS, strict_drop_unknown=True
-                    )
-                    st.session_state["cover_fields_df"] = sync_fields_to_columns(
-                        st.session_state["cover_fields_df"], list(active_df.columns), DEFAULT_COVER_FIELDS, strict_drop_unknown=True
-                    )
-                    st.success("นำเข้า Preset สำเร็จ และ sync กับคอลัมน์ข้อมูลแล้ว")
+                        st.success("นำเข้า Preset (Body + Cover) สำเร็จ")
                 except Exception as e:
                     st.error(f"อ่านไฟล์/URL Preset ไม่ได้: {e}")
 
@@ -530,7 +571,7 @@ with colR:
                     "body": {"fields": st.session_state["fields_df"].to_dict(orient="records")},
                     "cover": {
                         "fields": st.session_state["cover_fields_df"].to_dict(orient="records"),
-                        "data_row_index": 0,
+                        "data_row_index": 0,  # always zero by design
                     },
                 }
                 buf = io.StringIO(); json.dump(payload, buf, ensure_ascii=False, indent=2)
@@ -550,34 +591,13 @@ with colR:
     else:
         st.warning("Preset: ยังไม่พบ (ระบบพยายามโหลดอัตโนมัติจาก GitHub)")
 
-    # ---------- NEW: Auto-sync เมื่อคอลัมน์เปลี่ยน ----------
-    curr_cols = list(active_df.columns)
-    if st.session_state.get("_body_cols") != curr_cols:
-        st.session_state["fields_df"] = sync_fields_to_columns(
-            st.session_state.get("fields_df"), curr_cols, DEFAULT_FIELDS, strict_drop_unknown=True
-        )
-        st.session_state["_body_cols"] = curr_cols
-
-    if st.session_state.get("_cover_cols") != curr_cols:
-        st.session_state["cover_fields_df"] = sync_fields_to_columns(
-            st.session_state.get("cover_fields_df"), curr_cols, DEFAULT_COVER_FIELDS, strict_drop_unknown=True
-        )
-        st.session_state["_cover_cols"] = curr_cols
-
-    # ---------- Manual sync buttons ----------
-    s1, s2 = st.columns(2)
-    with s1:
-        if st.button("🔄 Sync Body Layout ให้ตรงกับคอลัมน์ข้อมูล"):
-            st.session_state["fields_df"] = sync_fields_to_columns(
-                st.session_state.get("fields_df"), list(active_df.columns), DEFAULT_FIELDS, strict_drop_unknown=True
-            )
-            st.success("Body Layout synced!")
-    with s2:
-        if st.button("🔄 Sync Cover Layout ให้ตรงกับคอลัมน์ข้อมูล"):
-            st.session_state["cover_fields_df"] = sync_fields_to_columns(
-                st.session_state.get("cover_fields_df"), list(active_df.columns), DEFAULT_COVER_FIELDS, strict_drop_unknown=True
-            )
-            st.success("Cover Layout synced!")
+    # (ออปชัน) ปุ่ม Resync เอง
+    with st.expander("🔁 Sync Layout กับ CSV (กดเองถ้าจำเป็น)", expanded=False):
+        if st.button("Resync now"):
+            cols = st.session_state.get("current_csv_cols", active_df.columns.tolist())
+            st.session_state["fields_df"] = reconcile_fields(st.session_state["fields_df"], cols, DEFAULT_FIELDS)
+            st.session_state["cover_fields_df"] = reconcile_fields(st.session_state["cover_fields_df"], cols, DEFAULT_COVER_FIELDS)
+            st.toast("Resynced!", icon="✅")
 
     # Tabs for editing
     tab_body, tab_cover = st.tabs(["⚙️ Body Layout", "⚙️ Cover Layout"])
@@ -730,6 +750,5 @@ st.markdown("---")
 st.caption(
     "CSV: No, Student ID, Name, Semester 1, Semester 2, Total, Rating, Grade, Year • "
     "Preset รวม (data_row_index=0) • ใช้ PDF เท่านั้น • "
-    "Layout ถูก sync กับคอลัมน์ข้อมูลอัตโนมัติทั้ง Body/Cover (กดปุ่ม 🔄 ได้ตลอด) • "
-    "โหลดอัตโนมัติจาก GitHub ได้ทั้ง Template + Preset + CSV"
+    "โหลดอัตโนมัติจาก GitHub ได้ทั้ง Template + Preset + CSV (รองรับลิงก์หน้าเว็บ GitHub และ raw)"
 )
