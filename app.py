@@ -12,6 +12,7 @@
 #   ✅ Preset Auto-load จาก GitHub + แสดงสถานะ
 #   ✅ Align ซ้าย/กลาง/ขวา ด้วยการวัดความกว้างข้อความแบบ compatible (ทุกเวอร์ชัน PyMuPDF)
 #   ✅ Auto-Sync: เปลี่ยน CSV → อัปเดต 1) 📚 ข้อมูล (preview)  2) ⚙️ Body Layout  3) ⚙️ Cover Layout
+#   ✅ FIX: ฟิลด์ "no" จะไม่โดนลบ/ข้ามจาก Layout อีกต่อไป
 #
 # Install deps:
 #   pip install streamlit pandas pillow pymupdf requests
@@ -206,13 +207,15 @@ def build_field_df(existing_cols: List[str], defaults) -> pd.DataFrame:
         rows.append({
             "field_key": k,
             "label": label,
-            "active": active if k in existing or k in ["name", "student_id", "total"] else False,
+            # เปิดอัตโนมัติถ้าอยู่ใน CSV หรือเป็นคีย์สำคัญ (name/id/total)
+            "active": active if k in existing or k in ["name", "student_id", "total", "no"] else False,
             "x": x, "y": y, "font": font, "size": size,
             "transform": transform, "align": align
         })
         known.add(k)
+    # เติมคอลัมน์ที่โผล่มาใหม่ใน CSV
     for c in existing:
-        if c not in known and c not in ["no"]:
+        if c not in known:
             rows.append({
                 "field_key": c,
                 "label": c.title(),
@@ -328,6 +331,7 @@ def reconcile_fields(layout_df: pd.DataFrame, csv_cols: List[str], defaults) -> 
       - คีย์ที่มีอยู่แล้ว: เก็บค่าตำแหน่ง/ฟอนต์เดิม
       - คีย์ที่เพิ่มใหม่จาก CSV: เติมเข้าไป (ใช้ค่าจาก defaults ถ้ามี, มิเช่นนั้นเป็นค่า generic)
       - คีย์ที่หายไปจาก CSV: คงไว้แต่ปิด active (กันเผื่อ preset เก่า)
+      - ✅ 'no' จะถูกซิงค์เหมือนคอลัมน์อื่น ๆ (ไม่ถูกข้าม/ลบทิ้ง)
     """
     if layout_df is None or layout_df.empty:
         return build_field_df(csv_cols, defaults)
@@ -336,9 +340,8 @@ def reconcile_fields(layout_df: pd.DataFrame, csv_cols: List[str], defaults) -> 
     dmap = _defaults_to_rowmap(defaults)
 
     rows = []
+    # เดิม: if c == "no": continue — ลบทิ้งเพื่อให้ 'no' อยู่เสมอ
     for c in csv_cols:
-        if c == "no":
-            continue
         if c in existing:
             rows.append(existing[c])
         else:
@@ -349,8 +352,9 @@ def reconcile_fields(layout_df: pd.DataFrame, csv_cols: List[str], defaults) -> 
             })
             rows.append(base)
 
+    # เดิม: if k not in csv_cols and k != "no": — ตัด != "no" ออก เพื่อคงแถว 'no' ไว้ด้วย
     for k, row in existing.items():
-        if k not in csv_cols and k != "no":
+        if k not in csv_cols:
             row = {**row, "active": False}
             rows.append(row)
 
@@ -408,7 +412,7 @@ with c1:
     if body_source == "uploaded":
         st.success("Body Template: ใช้ไฟล์ที่อัปโหลด")
     elif body_source == "github":
-        st.info(f"Body Template: โหลดจาก GitHub อัตโนมัติ\n{to_raw_github(DEFAULT_BODY_URL)}")
+        st.info(f"Body Template: โหลดจาก GitHub อัตโนมัติ\\n{to_raw_github(DEFAULT_BODY_URL)}")
     else:
         st.error("Body Template: ไม่พบทั้งไฟล์อัปโหลดและค่าเริ่มต้นจาก GitHub")
 with c2:
@@ -418,7 +422,7 @@ with c2:
         if cover_source == "uploaded":
             st.success("Cover Template: ใช้ไฟล์ที่อัปโหลด")
         elif cover_source == "github":
-            st.info(f"Cover Template: โหลดจาก GitHub อัตโนมัติ\n{to_raw_github(DEFAULT_COVER_URL)}")
+            st.info(f"Cover Template: โหลดจาก GitHub อัตโนมัติ\\n{to_raw_github(DEFAULT_COVER_URL)}")
         else:
             st.error("Cover Template: ไม่พบทั้งไฟล์อัปโหลดและค่าเริ่มต้นจาก GitHub")
 
@@ -427,7 +431,7 @@ st.subheader("🔔 สถานะข้อมูล (CSV)")
 if csv_source == "uploaded":
     st.success("CSV: ใช้ไฟล์ที่อัปโหลด")
 elif csv_source == "github":
-    st.info(f"CSV: โหลดจาก GitHub อัตโนมัติ\n{to_raw_github(DEFAULT_CSV_URL)}")
+    st.info(f"CSV: โหลดจาก GitHub อัตโนมัติ\\n{to_raw_github(DEFAULT_CSV_URL)}")
 else:
     st.error("CSV: ไม่พบทั้งไฟล์อัปโหลดและค่าเริ่มต้นจาก GitHub")
 
