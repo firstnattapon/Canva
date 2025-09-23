@@ -65,6 +65,7 @@ CANONICAL_COLS = {
 
 # Body defaults
 DEFAULT_FIELDS = [
+    ("no", "No", True, 140.0, 160.0, "helv", 14, "title", "left"),    
     ("name", "Name", True, 140.0, 160.0, "helv", 14, "title", "left"),
     ("student_id", "Student ID", True, 140.0, 185.0, "helv", 12, "none", "left"),
     ("sem1", "Semester 1", True, 420.0, 160.0, "helv", 14, "none", "left"),
@@ -77,6 +78,7 @@ DEFAULT_FIELDS = [
 
 # Cover defaults
 DEFAULT_COVER_FIELDS = [
+    ("no", "No", True, 140.0, 160.0, "helv", 14, "title", "left"),    
     ("name", "Name", True, 220.0, 260.0, "helv", 24, "title", "left"),
     ("student_id", "Student ID", True, 220.0, 292.0, "helv", 16, "none", "left"),
     ("year", "Year", False, 220.0, 324.0, "helv", 14, "none", "left"),
