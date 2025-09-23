@@ -1,5 +1,5 @@
 # Add auto-load for main CSV from GitHub (like Body/Cover), with visible status.
-code = r'''# -*- coding: utf-8 -*-
+# code = r'''# -*- coding: utf-8 -*-
 # =============================================================
 # Streamlit App: PDF Template Overlay + CSV -> Batch PDF Export (PDF-only)
 # Features:
