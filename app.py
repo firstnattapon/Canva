@@ -746,8 +746,8 @@ with tab2:
         st.session_state["cover_fields_df"] = edited_cover
 
 st.markdown("---")
-st.caption(
-    "CSV: No, Student ID, Name, Semester 1, Semester 2, Total, Rating, Grade, Year • "
-    "Preset รวม (data_row_index=0) • ใช้ PDF เท่านั้น • "
-    "โหลดอัตโนมัติจาก GitHub ได้ทั้ง Template + Preset + CSV (รองรับลิงก์หน้าเว็บ GitHub และ raw)"
-)
+# st.caption(
+#     "CSV: No, Student ID, Name, Semester 1, Semester 2, Total, Rating, Grade, Year • "
+#     "Preset รวม (data_row_index=0) • ใช้ PDF เท่านั้น • "
+#     "โหลดอัตโนมัติจาก GitHub ได้ทั้ง Template + Preset + CSV (รองรับลิงก์หน้าเว็บ GitHub และ raw)"
+# )
