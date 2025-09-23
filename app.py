@@ -83,7 +83,8 @@ def parse_csv_bytes(b: bytes) -> pd.DataFrame | None:
     cols = [c for c in df.columns if c in REQUIRED_COLS]
     df = df[cols]
     if "No" in df.columns:
-        mask_score = df["No"].astype(str).strip().str.lower().eq("score")
+        # >>> แก้จุดพัง: ใช้ .str.strip() แทน .strip()
+        mask_score = df["No"].astype(str).str.strip().str.lower().eq("score")
         df = df[~mask_score]
         df = df[df["No"].astype(str).str.strip() != ""]
     df.columns = [c.strip() for c in df.columns]
@@ -297,10 +298,8 @@ with right:
             top_left_mode,
             font_bytes
         )
-        # เรนเดอร์เป็นภาพ (ถ้ามี pymupdf) ไม่โดนบล็อกแน่
         shown = render_preview_as_image(preview_pdf, zoom_dpi=st.sidebar.slider("Preview DPI", 120, 220, 160, 10))
         if not shown:
-            # ถ้าไม่มี pymupdf → ลอง st.pdf (เวอร์ชันใหม่), หรือฝัง iframe เป็นทางสุดท้าย
             render_preview_as_pdf(preview_pdf, height=820)
         st.download_button("⬇️ ดาวน์โหลดพรีวิว (PDF 1 หน้า)", preview_pdf, file_name="preview_1page.pdf")
     except Exception as e:
