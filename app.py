@@ -1,7 +1,7 @@
 import io
 import streamlit as st
 import pandas as pd
-import pymupdf as fitz  # <<< ใช้ pymupdf เพื่อเลี่ยงแพ็กเกจชื่อซ้ำ "fitz"
+import PyMuPDF as fitz  # <<< ใช้ pymupdf เพื่อเลี่ยงแพ็กเกจชื่อซ้ำ "fitz"
 
 st.set_page_config(page_title="Conversation Result (Per Student Pages)", layout="wide")
 st.title("📄 Conversation Result → 1 หน้า/1 คน (รองรับ 1–2 เทอม)")
