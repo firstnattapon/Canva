@@ -1,23 +1,12 @@
+
 # -*- coding: utf-8 -*-
 # =========================
 # Streamlit App: PDF Template Overlay + CSV -> Batch PDF Export
-# Features:
-# - Upload single-page Canva PDF template (or PNG/JPG fallback)
-# - Upload CSV Term 1 (required) and Term 2 (optional)
-# - Choose join key (Student ID or Name - Surname)
-# - Toggle Active/Inactive fields and edit X/Y, font, size, case
-# - Live Preview (updates when controls change)
-# - Export one-page-per-student PDF
-#
-# Dependencies:
-#   pip install streamlit pandas pillow pymupdf pypdf reportlab
-#
-# Coordinate system:
-#   When using a PDF template, X/Y are in points (pt) with origin at top-left.
-#   When using an image template, X/Y are in pixels (origin top-left).
+# (with Layout Editor JSON import/export)
 # =========================
 
 import io
+import json
 from typing import List
 
 import streamlit as st
@@ -78,12 +67,8 @@ DEFAULT_FIELDS = [
 STD_FONTS = ["helv", "times", "cour"]  # Built-in fonts for PyMuPDF
 
 def try_read_table(uploaded_file) -> pd.DataFrame:
-    """
-    Read CSV or Excel into DataFrame.
-    """
     if uploaded_file is None:
         return pd.DataFrame()
-
     name = uploaded_file.name.lower()
     try:
         if name.endswith(".csv"):
@@ -111,7 +96,6 @@ def canonicalize_columns(df: pd.DataFrame) -> pd.DataFrame:
         if c in CANONICAL_COLS:
             key = CANONICAL_COLS[c]
         else:
-            # Try relaxed matching
             c2 = c.strip().lower().replace(" ", "").replace("-", "").replace("_", "")
             if c2 in ["studentid", "id"]:
                 key = "student_id"
@@ -144,7 +128,6 @@ def build_field_df(existing_cols: List[str]) -> pd.DataFrame:
             "transform": transform, "align": align
         })
         known.add(k)
-    # dynamically add unknown columns from DF (if any)
     for c in existing:
         if c not in known and c not in ["no"]:
             rows.append({
@@ -176,17 +159,12 @@ def get_record_display(rec: pd.Series, key_cols=("student_id","name")) -> str:
     return " • ".join(parts) if parts else "(no id / name)"
 
 def render_preview_with_pymupdf(template_bytes: bytes, fields_df: pd.DataFrame,
-                                record: pd.Series, scale: float = 2.0) -> Image.Image:
-    """
-    Draw preview by copying template page and overlaying text with PyMuPDF, then rasterize.
-    """
+                                record: pd.Series, scale: float = 2.0):
     if fitz is None:
         raise RuntimeError("PyMuPDF (fitz) is not available")
     td = fitz.open(stream=template_bytes, filetype="pdf")
     if td.page_count != 1:
         st.warning("เทมเพลตต้องเป็น PDF หน้าเดียว จะใช้หน้าแรกแทน")
-    page = td.load_page(0)
-    # Clone into a new document for drawing
     newdoc = fitz.open()
     newdoc.insert_pdf(td, from_page=0, to_page=0)
     p = newdoc[0]
@@ -204,25 +182,23 @@ def render_preview_with_pymupdf(template_bytes: bytes, fields_df: pd.DataFrame,
         x, y = float(row["x"]), float(row["y"])
         font = row.get("font", "helv")
         size = float(row.get("size", 12))
-        # Alignment: left only for simplicity; extend if needed.
         try:
             p.insert_text((x, y), text, fontname=font if font in STD_FONTS else "helv",
                           fontsize=size, color=(0,0,0))
         except Exception:
-            # fallback
             p.insert_text((x, y), text, fontname="helv", fontsize=size, color=(0,0,0))
 
     mat = fitz.Matrix(scale, scale)
     pix = p.get_pixmap(matrix=mat, alpha=False)
+    from PIL import Image
     img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
     td.close()
     newdoc.close()
     return img
 
+from PIL import Image
+
 def draw_on_image(img: Image.Image, fields_df: pd.DataFrame, record: pd.Series) -> Image.Image:
-    """
-    Fallback preview when using PNG/JPG template. Coordinates in pixels.
-    """
     im = img.copy()
     draw = ImageDraw.Draw(im)
     for _, row in fields_df.iterrows():
@@ -237,7 +213,6 @@ def draw_on_image(img: Image.Image, fields_df: pd.DataFrame, record: pd.Series) 
         text = apply_transform(val, row["transform"])
         x, y = int(row["x"]), int(row["y"])
         size = int(row.get("size", 12))
-        # Try to use a common font for readability
         try:
             font = ImageFont.truetype("DejaVuSans.ttf", size=size)
         except Exception:
@@ -248,9 +223,6 @@ def draw_on_image(img: Image.Image, fields_df: pd.DataFrame, record: pd.Series) 
 def export_batch_pdf_with_pymupdf(template_bytes: bytes,
                                   fields_df: pd.DataFrame,
                                   df: pd.DataFrame) -> bytes:
-    """
-    Use PyMuPDF to create 1-page-per-record PDF by copying the template page.
-    """
     if fitz is None:
         raise RuntimeError("ต้องติดตั้ง PyMuPDF (fitz) เพื่อส่งออก PDF")
     tdoc = fitz.open(stream=template_bytes, filetype="pdf")
@@ -273,7 +245,6 @@ def export_batch_pdf_with_pymupdf(template_bytes: bytes,
             x, y = float(row["x"]), float(row["y"])
             font = row.get("font", "helv")
             size = float(row.get("size", 12))
-
             try:
                 page.insert_text((x, y), str(text),
                                  fontname=font if font in STD_FONTS else "helv",
@@ -281,7 +252,6 @@ def export_batch_pdf_with_pymupdf(template_bytes: bytes,
             except Exception:
                 page.insert_text((x, y), str(text),
                                  fontname="helv", fontsize=size, color=(0,0,0))
-    # Save to bytes
     pdf_bytes = out.tobytes()
     out.close()
     tdoc.close()
@@ -315,7 +285,6 @@ with st.sidebar:
     use_term = st.radio("เลือกชุดคะแนนสำหรับแสดง/พิมพ์", ["เทอม 1", "เทอม 2 (ถ้ามี)", "เฉลี่ย (Total เท่านั้น)"], index=0)
 
 with colL:
-    # 1) Load & canonicalize data
     df1 = canonicalize_columns(try_read_table(csv_t1))
     df2 = canonicalize_columns(try_read_table(csv_t2))
 
@@ -323,7 +292,6 @@ with colL:
         st.warning("อัปโหลด CSV เทอม 1 ก่อน")
         st.stop()
 
-    # Ensure necessary columns exist
     needed = ["student_id", "name"]
     for c in needed:
         if c not in df1.columns:
@@ -331,11 +299,8 @@ with colL:
 
     active_df = df1.copy()
     if not df2.empty and join_key in df2.columns:
-        # inner join by default to keep matched
         merged = pd.merge(df1, df2, how="inner", on=join_key, suffixes=("_t1", "_t2"))
-        # Compose active_df depending on selection
         if use_term.startswith("เทอม 1"):
-            # take *_t1 when available else original
             cols = []
             for c in df1.columns:
                 if c + "_t1" in merged.columns:
@@ -343,7 +308,6 @@ with colL:
                 elif c in merged.columns:
                     cols.append(c)
             active_df = merged[cols].copy()
-            # drop suffixes in headers
             active_df.columns = [c.replace("_t1", "") for c in active_df.columns]
         elif use_term.startswith("เทอม 2"):
             cols = []
@@ -356,7 +320,6 @@ with colL:
             active_df = merged[cols].copy()
             active_df.columns = [c.replace("_t2", "") for c in active_df.columns]
         else:
-            # Average totals if present
             active_df = merged.copy()
             def pick(col):
                 if col + "_t1" in merged and col + "_t2" in merged:
@@ -366,7 +329,6 @@ with colL:
                 if col + "_t2" in merged:
                     return merged[col + "_t2"]
                 return merged[col] if col in merged else None
-            # Build active df with base structure
             base_cols = ["student_id","name","idea","pronunciation","preparedness","confidence","total"]
             data = {}
             for c in base_cols:
@@ -375,13 +337,10 @@ with colL:
                     data[c] = series
             active_df = pd.DataFrame(data)
     else:
-        # Only term 1 uploaded
         active_df = df1.copy()
 
-    # Keep only canonical & pass-through cols
     if "no" not in active_df.columns and "No" in df1.columns:
         active_df["no"] = df1["No"]
-    # reorder if present
     pref = ["no","student_id","name","idea","pronunciation","preparedness","confidence","total"]
     ordered = [c for c in pref if c in active_df.columns] + [c for c in active_df.columns if c not in pref]
     active_df = active_df[ordered]
@@ -391,10 +350,51 @@ with colL:
 
 with colR:
     st.subheader("⚙️ Layout Editor")
+
     if "fields_df" not in st.session_state:
         st.session_state["fields_df"] = build_field_df(active_df.columns.tolist())
 
-    # Let user tweak config as a table editor
+    # --------- Import/Export JSON for Layout Editor ---------
+    with st.expander("🧩 Presets (Import/Export .json)", expanded=False):
+        col_i, col_e = st.columns(2)
+        with col_i:
+            layout_json = st.file_uploader("นำเข้า Layout (.json)", type=["json"], key="layout_json_upload")
+            if layout_json is not None:
+                try:
+                    raw = json.load(layout_json)
+                    fields_list = raw.get("fields", raw if isinstance(raw, list) else None)
+                    if not isinstance(fields_list, list):
+                        raise ValueError("โครงสร้าง JSON ต้องเป็น { 'fields': [...] } หรือเป็นลิสต์ของคอนฟิกฟิลด์")
+                    new_df = pd.DataFrame(fields_list)
+                    req = ["field_key","label","active","x","y","font","size","transform","align"]
+                    missing = [c for c in req if c not in new_df.columns]
+                    if missing:
+                        raise ValueError(f"ขาดคีย์ใน JSON: {missing}")
+                    # เลือกเก็บเฉพาะคอลัมน์ที่จำเป็น เผื่อมีของแถมมา
+                    new_df = new_df[req]
+                    st.session_state["fields_df"] = new_df
+                    st.success("นำเข้า Layout สำเร็จ")
+                except Exception as e:
+                    st.error(f"อ่านไฟล์ JSON ไม่ได้: {e}")
+
+        with col_e:
+            try:
+                payload = {
+                    "version": 1,
+                    "fields": st.session_state["fields_df"].to_dict(orient="records")
+                }
+                buf = io.StringIO()
+                json.dump(payload, buf, ensure_ascii=False, indent=2)
+                st.download_button(
+                    "⬇️ Export Layout (.json)",
+                    data=buf.getvalue().encode("utf-8"),
+                    file_name="layout_preset.json",
+                    mime="application/json"
+                )
+            except Exception as e:
+                st.error(f"Export JSON ผิดพลาด: {e}")
+    # --------------------------------------------------------
+
     edited = st.data_editor(
         st.session_state["fields_df"],
         use_container_width=True,
@@ -414,7 +414,6 @@ with colR:
     )
     st.session_state["fields_df"] = edited
 
-    # Record selector
     st.subheader("🔎 พรีวิว")
     idx_options = list(range(len(active_df)))
     if len(idx_options) == 0:
@@ -422,7 +421,6 @@ with colR:
     rec_idx = st.number_input("แถวที่ต้องการพรีวิว (index)", min_value=0, max_value=len(idx_options)-1, value=0, step=1)
     record = active_df.iloc[int(rec_idx)]
 
-    # Live preview
     preview_img = None
     try:
         if tpl_pdf is not None and fitz is not None:
@@ -451,7 +449,6 @@ with colR:
                 st.success(f"เสร็จแล้ว: {len(active_df)} หน้า")
                 st.download_button("⬇️ ดาวน์โหลด PDF", data=pdf_bytes, file_name="exported_batch.pdf", mime="application/pdf")
             elif tpl_img is not None:
-                # Export via images -> PDFs (lower fidelity)
                 pages = []
                 base_img = Image.open(tpl_img).convert("RGB")
                 for _, rec in active_df.iterrows():
