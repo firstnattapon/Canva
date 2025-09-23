@@ -601,8 +601,8 @@ with tab1:
                     use_container_width=True,
                 )
                 if body_source == "github" and tpl_pdf is None:
-                    # st.caption(f"กำลังใช้ Body จาก GitHub: {to_raw_github(DEFAULT_BODY_URL)}")
-                st.caption("Body: หน่วย X/Y = จุด (pt) — มุมซ้ายบนคือ (0,0)")
+                    st.caption(f"กำลังใช้ Body จาก GitHub: {to_raw_github(DEFAULT_BODY_URL)}")
+                # st.caption("Body: หน่วย X/Y = จุด (pt) — มุมซ้ายบนคือ (0,0)")
             else:
                 st.info("อัปโหลด Template PDF ของ Body หรือให้ระบบโหลดค่าเริ่มต้นจาก GitHub (ตรวจสอบเครือข่าย)")
         else:  # Cover
