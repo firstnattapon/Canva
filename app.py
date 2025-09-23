@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 # =============================================================
 # Streamlit App: PDF Template Overlay + CSV -> Batch PDF Export (PDF-only)
-# Spec:
+# Spec update:
 #   ✅ รับไฟล์ CSV เดียว: No, Student ID, Name, Semester 1, Semester 2, Total, Rating, Grade, Year
-#   ✅ Template เฉพาะ PDF เท่านั้น (ตัดโหมดภาพทิ้ง)
-#   ✅ Cover ใช้ข้อมูลเหมือน Body แต่ Layout แยก (ปกหน้าแรกครั้งเดียว)
-#   ✅ Preset (.json) รวมไฟล์เดียว (Body + Cover + cover_data_index)
+#   ✅ Template เฉพาะ PDF เท่านั้น (ไม่มีอัปโหลดรูป)
+#   ✅ Cover ใช้ข้อมูล "แถวที่ 0 เสมอ" (บังคับ) และลบ UI เลือกแถวออกแล้ว
+#   ✅ Preset (.json) รวมไฟล์เดียว (Body + Cover) — บันทึก data_row_index=0 เสมอ
 #   ✅ พรีวิวสด (Body/Cover) — ใช้ use_container_width
 #
 # Install deps:
@@ -25,7 +25,7 @@ try:
 except Exception:
     fitz = None
 
-from PIL import Image  # pillow required by Streamlit image machinery (not used for uploads)
+from PIL import Image  # used to render pixmap previews
 
 # ------------------ Canonical columns & defaults ------------------
 CANONICAL_COLS = {
@@ -221,7 +221,7 @@ def render_preview_with_pymupdf(template_bytes: bytes, fields_df: pd.DataFrame,
 
 st.set_page_config(page_title="PDF Layout Editor — CSV (Unified) → Batch PDF [PDF-only]", layout="wide")
 st.title("🖨️ PDF Layout Editor — CSV เดียว → Batch PDF (PDF-only, ปกครั้งเดียว)")
-st.caption("Cover ใช้ข้อมูลชุดเดียวกับ Body แต่มี Layout แยก • ปกอยู่หน้าแรก 1 ครั้ง • Preset .json รวม Body/Cover • รองรับ **PDF เท่านั้น**")
+st.caption("Cover ใช้ข้อมูลชุดเดียวกับ Body แต่มี Layout แยก • ปกอยู่หน้าแรก 1 ครั้ง • Preset .json รวม Body/Cover • รองรับ **PDF เท่านั้น** • ปกใช้ข้อมูล \"แถว 0\" เสมอ")
 
 if fitz is None:
     st.error("ต้องติดตั้ง PyMuPDF ก่อนใช้งาน: `pip install pymupdf`")
@@ -236,7 +236,6 @@ with st.sidebar:
     st.header("🧾 เทมเพลต — ปก (PDF เท่านั้น)")
     cover_active = st.checkbox("Active ปก (หน้าแรกเสมอ; ไม่ต่อคน)", value=False)
     tpl_cover_pdf = st.file_uploader("Cover Template PDF", type=["pdf"])
-    cover_data_index = st.number_input("ข้อมูลสำหรับปก: ใช้แถวที่", min_value=0, value=0, step=1)
 
     st.header("📥 ข้อมูล (CSV เดียว)")
     csv_main = st.file_uploader("CSV หลัก (ตามสคีมาใหม่)", type=["csv", "xlsx", "xls"])
@@ -263,7 +262,7 @@ with colL:
     st.dataframe(active_df.head(12), use_container_width=True)
 
 with colR:
-    st.subheader("🧩 Preset (.json) — รวม Body + Cover")
+    st.subheader("🧩 Preset (.json) — รวม Body + Cover (cover ใช้แถว 0 เสมอ)")
 
     # Init session states
     if "fields_df" not in st.session_state:
@@ -295,19 +294,18 @@ with colR:
                             st.session_state["fields_df"] = pd.DataFrame(body["fields"])
                         if "fields" in cover:
                             st.session_state["cover_fields_df"] = pd.DataFrame(cover["fields"])
-                        if "data_row_index" in cover:
-                            st.session_state["cover_data_index_from_preset"] = int(cover["data_row_index"])
-                        st.success("นำเข้า Preset (Body + Cover) สำเร็จ")
+                        # Ignore any data_row_index from preset — always 0 per spec
+                        st.success("นำเข้า Preset (Body + Cover) สำเร็จ — ใช้แถว 0 สำหรับปกเสมอ")
                 except Exception as e:
                     st.error(f"อ่านไฟล์ JSON ไม่ได้: {e}")
         with col_e:
             try:
                 payload = {
-                    "version": 7,
+                    "version": 8,
                     "body": {"fields": st.session_state["fields_df"].to_dict(orient="records")},
                     "cover": {
                         "fields": st.session_state["cover_fields_df"].to_dict(orient="records"),
-                        "data_row_index": int(cover_data_index),
+                        "data_row_index": 0,  # always zero by design
                     },
                 }
                 buf = io.StringIO(); json.dump(payload, buf, ensure_ascii=False, indent=2)
@@ -366,13 +364,8 @@ if len(idx_options) == 0:
 rec_idx = st.number_input("แถวที่ต้องการพรีวิว (Body)", min_value=0, max_value=len(idx_options)-1, value=0, step=1)
 record_body = active_df.iloc[int(rec_idx)]
 
-# Cover record (global)
-if 'cover_data_index_from_preset' in st.session_state:
-    cov_idx = int(min(max(0, st.session_state['cover_data_index_from_preset']), len(active_df)-1))
-    st.info(f"Cover ใช้ index จาก preset: {cov_idx} (ปรับที่ Sidebar เพื่อเปลี่ยน)")
-else:
-    cov_idx = int(min(max(0, cover_data_index), len(active_df)-1))
-
+# Cover record = row 0 ALWAYS
+cov_idx = 0
 record_cover = active_df.iloc[cov_idx]
 
 page_type = st.radio("หน้าไหน", ["Body", "Cover"], index=0, horizontal=True)
@@ -393,10 +386,10 @@ try:
             if tpl_cover_pdf is not None:
                 st.image(
                     render_preview_with_pymupdf(tpl_cover_pdf.getvalue(), st.session_state["cover_fields_df"], record_cover, 2.0),
-                    caption=f"Cover — ใช้ข้อมูลแถวที่ {cov_idx} ({get_record_display(record_cover)})",
+                    caption=f"Cover — ใช้ข้อมูลแถวที่ 0 (แถวแรก) — {get_record_display(record_cover)}",
                     use_container_width=True,
                 )
-                st.caption("Cover: หน่วย X/Y = จุด (pt) — มุมซ้ายบนคือ (0,0) • ใช้ข้อมูลจากแถวที่ระบุ")
+                st.caption("Cover: หน่วย X/Y = จุด (pt) — มุมซ้ายบนคือ (0,0) • ใช้ข้อมูลจากแถวที่ 0 เสมอ")
             else:
                 st.info("เปิด Active ปก แล้ว—อัปโหลด Cover Template PDF")
         else:
@@ -415,12 +408,12 @@ if st.button("🚀 Export PDF"):
             body_tpl_bytes = tpl_pdf.getvalue()
             out = fitz.open()
 
-            # Insert global cover once using selected record
+            # Insert global cover once using row 0
             if cover_active and (tpl_cover_pdf is not None):
                 t_cover = fitz.open(stream=tpl_cover_pdf.getvalue(), filetype="pdf")
                 out.insert_pdf(t_cover, from_page=0, to_page=0)
                 page0 = out[-1]
-                # Overlay cover fields with chosen record
+                # Overlay cover fields with row 0
                 for _, row in st.session_state["cover_fields_df"].iterrows():
                     if not row["active"]:
                         continue
@@ -467,4 +460,4 @@ if st.button("🚀 Export PDF"):
         st.error(f"ส่งออกไม่สำเร็จ: {e}")
 
 st.markdown("---")
-st.caption("รับ CSV เดียวคอลัมน์: No, Student ID, Name, Semester 1, Semester 2, Total, Rating, Grade, Year • Preset รวม: { version, body.fields[], cover.fields[], cover.data_row_index } • รองรับไฟล์ PDF เท่านั้น • ใช้ use_container_width เสมอ")
+st.caption("รับ CSV เดียวคอลัมน์: No, Student ID, Name, Semester 1, Semester 2, Total, Rating, Grade, Year • Preset รวม Body/Cover (บันทึก data_row_index=0) • รองรับไฟล์ PDF เท่านั้น • ใช้ use_container_width เสมอ")
