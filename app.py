@@ -132,99 +132,99 @@ def merge_semesters(df1: pd.DataFrame | None, df2: pd.DataFrame | None,
         out = out.sort_values(by=["Name","StudentID"], kind="stable")
     return out.reset_index(drop=True)
 
-# ========= Overlay builder (ReportLab) + merge (PyPDF) =========
-def build_one_page_overlay_pdf(page_w: float, page_h: float,
-                               name: str, sid: str, total_s1: str, total_s2: str,
-                               font_size: float, bold: bool,
-                               name_xy, id_xy, s1_xy, s2_xy,
-                               top_left_mode: bool,
-                               font_bytes: bytes | None,
-                               whiteout: bool, pad_x: float, pad_y: float) -> bytes:
-    from reportlab.pdfgen import canvas
-    from reportlab.lib.colors import black, white
-    from reportlab.pdfbase import pdfmetrics
-    from reportlab.pdfbase.ttfonts import TTFont
+# # ========= Overlay builder (ReportLab) + merge (PyPDF) =========
+# def build_one_page_overlay_pdf(page_w: float, page_h: float,
+#                                name: str, sid: str, total_s1: str, total_s2: str,
+#                                font_size: float, bold: bool,
+#                                name_xy, id_xy, s1_xy, s2_xy,
+#                                top_left_mode: bool,
+#                                font_bytes: bytes | None,
+#                                whiteout: bool, pad_x: float, pad_y: float) -> bytes:
+#     from reportlab.pdfgen import canvas
+#     from reportlab.lib.colors import black, white
+#     from reportlab.pdfbase import pdfmetrics
+#     from reportlab.pdfbase.ttfonts import TTFont
 
-    buf = io.BytesIO()
-    c = canvas.Canvas(buf, pagesize=(page_w, page_h))
+#     buf = io.BytesIO()
+#     c = canvas.Canvas(buf, pagesize=(page_w, page_h))
 
-    # ฟอนต์
-    fontname = "Helvetica-Bold" if bold else "Helvetica"
-    if font_bytes:
-        try:
-            pdfmetrics.registerFont(TTFont("CustomFont", io.BytesIO(font_bytes)))
-            fontname = "CustomFont"
-        except Exception:
-            pass
-    c.setFont(fontname, float(font_size))
+#     # ฟอนต์
+#     fontname = "Helvetica-Bold" if bold else "Helvetica"
+#     if font_bytes:
+#         try:
+#             pdfmetrics.registerFont(TTFont("CustomFont", io.BytesIO(font_bytes)))
+#             fontname = "CustomFont"
+#         except Exception:
+#             pass
+#     c.setFont(fontname, float(font_size))
 
-    def put(x, y, text):
-        s = "" if text is None else str(text).strip()
-        if not s:
-            return
-        yy = (page_h - y) if top_left_mode else y  # แปลงแกนถ้าจำเป็น
+#     def put(x, y, text):
+#         s = "" if text is None else str(text).strip()
+#         if not s:
+#             return
+#         yy = (page_h - y) if top_left_mode else y  # แปลงแกนถ้าจำเป็น
 
-        if whiteout:
-            # คำนวณความกว้างข้อความ → วาดสี่เหลี่ยมพื้นขาว + padding
-            try:
-                from reportlab.pdfbase.pdfmetrics import stringWidth
-                tw = stringWidth(s, fontname, float(font_size))
-            except Exception:
-                tw = len(s) * (font_size * 0.55)  # fallback ประมาณการ
-            rect_x = float(x) - float(pad_x)
-            rect_y = float(yy) - float(pad_y)
-            rect_w = float(tw) + float(pad_x) * 2.0
-            rect_h = float(font_size) + float(pad_y) * 2.0
-            c.setFillColor(white)
-            c.rect(rect_x, rect_y, rect_w, rect_h, fill=1, stroke=0)
-            c.setFillColor(black)
+#         if whiteout:
+#             # คำนวณความกว้างข้อความ → วาดสี่เหลี่ยมพื้นขาว + padding
+#             try:
+#                 from reportlab.pdfbase.pdfmetrics import stringWidth
+#                 tw = stringWidth(s, fontname, float(font_size))
+#             except Exception:
+#                 tw = len(s) * (font_size * 0.55)  # fallback ประมาณการ
+#             rect_x = float(x) - float(pad_x)
+#             rect_y = float(yy) - float(pad_y)
+#             rect_w = float(tw) + float(pad_x) * 2.0
+#             rect_h = float(font_size) + float(pad_y) * 2.0
+#             c.setFillColor(white)
+#             c.rect(rect_x, rect_y, rect_w, rect_h, fill=1, stroke=0)
+#             c.setFillColor(black)
 
-        # วาดตัวอักษร
-        c.drawString(float(x), float(yy), s)
+#         # วาดตัวอักษร
+#         c.drawString(float(x), float(yy), s)
 
-    put(name_xy[0], name_xy[1], name)
-    put(id_xy[0],   id_xy[1],   sid)
-    put(s1_xy[0],   s1_xy[1],   total_s1)
-    put(s2_xy[0],   s2_xy[1],   total_s2)
+#     put(name_xy[0], name_xy[1], name)
+#     put(id_xy[0],   id_xy[1],   sid)
+#     put(s1_xy[0],   s1_xy[1],   total_s1)
+#     put(s2_xy[0],   s2_xy[1],   total_s2)
 
-    c.showPage(); c.save()
-    return buf.getvalue()
+#     c.showPage(); c.save()
+#     return buf.getvalue()
 
-# def merge_overlay_on_template(template_pdf_bytes: bytes, overlay_pdf_bytes_list: list[bytes]) -> bytes:
-#     from pypdf import PdfReader, PdfWriter
-#     writer = PdfWriter()
-#     for ov_bytes in overlay_pdf_bytes_list:
-#         tpl_reader = PdfReader(io.BytesIO(template_pdf_bytes))
-#         base_page = tpl_reader.pages[0]
-#         ov_reader = PdfReader(io.BytesIO(ov_bytes))
-#         ov_page = ov_reader.pages[0]
-#         base_page.merge_page(ov_page)  # วางทับด้วยพื้นขาวรองแล้วค่อยตัวหนังสือ
-#         writer.add_page(base_page)
-#     out = io.BytesIO()
-#     writer.write(out); out.seek(0)
-#     return out.getvalue()
+def merge_overlay_on_template(template_pdf_bytes: bytes, overlay_pdf_bytes_list: list[bytes]) -> bytes:
+    from pypdf import PdfReader, PdfWriter
+    writer = PdfWriter()
+    for ov_bytes in overlay_pdf_bytes_list:
+        tpl_reader = PdfReader(io.BytesIO(template_pdf_bytes))
+        base_page = tpl_reader.pages[0]
+        ov_reader = PdfReader(io.BytesIO(ov_bytes))
+        ov_page = ov_reader.pages[0]
+        base_page.merge_page(ov_page)  # วางทับด้วยพื้นขาวรองแล้วค่อยตัวหนังสือ
+        writer.add_page(base_page)
+    out = io.BytesIO()
+    writer.write(out); out.seek(0)
+    return out.getvalue()
 
-# def make_preview_pdf(template_pdf_bytes: bytes, rec: dict,
-#                      font_size: float, bold: bool,
-#                      name_xy, id_xy, s1_xy, s2_xy,
-#                      top_left_mode: bool,
-#                      font_bytes: bytes | None,
-#                      whiteout: bool, pad_x: float, pad_y: float) -> bytes:
-#     from pypdf import PdfReader
-#     reader = PdfReader(io.BytesIO(template_pdf_bytes))
-#     pg = reader.pages[0]
-#     page_w = float(pg.mediabox.width); page_h = float(pg.mediabox.height)
-#     overlay = build_one_page_overlay_pdf(
-#         page_w, page_h,
-#         rec.get("Name",""), rec.get("StudentID",""),
-#         rec.get("Total_S1",""), rec.get("Total_S2",""),
-#         font_size, bold,
-#         name_xy, id_xy, s1_xy, s2_xy,
-#         top_left_mode,
-#         font_bytes,
-#         whiteout, pad_x, pad_y
-#     )
-#     return merge_overlay_on_template(template_pdf_bytes, [overlay])
+def make_preview_pdf(template_pdf_bytes: bytes, rec: dict,
+                     font_size: float, bold: bool,
+                     name_xy, id_xy, s1_xy, s2_xy,
+                     top_left_mode: bool,
+                     font_bytes: bytes | None,
+                     whiteout: bool, pad_x: float, pad_y: float) -> bytes:
+    from pypdf import PdfReader
+    reader = PdfReader(io.BytesIO(template_pdf_bytes))
+    pg = reader.pages[0]
+    page_w = float(pg.mediabox.width); page_h = float(pg.mediabox.height)
+    overlay = build_one_page_overlay_pdf(
+        page_w, page_h,
+        rec.get("Name",""), rec.get("StudentID",""),
+        rec.get("Total_S1",""), rec.get("Total_S2",""),
+        font_size, bold,
+        name_xy, id_xy, s1_xy, s2_xy,
+        top_left_mode,
+        font_bytes,
+        whiteout, pad_x, pad_y
+    )
+    return merge_overlay_on_template(template_pdf_bytes, [overlay])
 
 def make_full_pdf(template_pdf_bytes: bytes, records: pd.DataFrame,
                   font_size: float, bold: bool,
