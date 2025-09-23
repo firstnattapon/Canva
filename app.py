@@ -329,41 +329,10 @@ with colL:
     pref = ["no", "student_id", "name", "sem1", "sem2", "total", "rating", "grade", "year"]
     ordered = [c for c in pref if c in df.columns] + [c for c in df.columns if c not in pref]
     active_df = df[ordered]
-    # Ensure numeric dtype for editor compatibility
-    for _c in ["no", "sem1", "sem2", "total"]:
-        if _c in active_df.columns:
-            active_df[_c] = pd.to_numeric(active_df[_c], errors="coerce")
 
-    st.subheader("📚 ข้อมูล (preview) — แก้ไขได้ตรงนี้")
-    # Initialize or refresh session_state active_df when CSV changes (by basic fingerprint)
-    csv_name = getattr(csv_main, "name", None)
-    fingerprint = (csv_name, tuple(active_df.columns), len(active_df))
-    if ("active_df" not in st.session_state) or (st.session_state.get("csv_fingerprint") != fingerprint):
-        st.session_state["active_df"] = active_df.copy()
-        st.session_state["csv_fingerprint"] = fingerprint
+    st.subheader("📚 ข้อมูล (preview)")
+    st.dataframe(active_df.head(12), use_container_width=True)
 
-    edited = st.data_editor(
-        st.session_state["active_df"],
-        use_container_width=True,
-        num_rows="dynamic",
-        hide_index=False,
-        column_config={
-            "no": st.column_config.NumberColumn("No", step=1),
-            "student_id": st.column_config.TextColumn("Student ID"),
-            "name": st.column_config.TextColumn("Name"),
-            "sem1": st.column_config.NumberColumn("Semester 1"),
-            "sem2": st.column_config.NumberColumn("Semester 2"),
-            "total": st.column_config.NumberColumn("Total"),
-            "rating": st.column_config.TextColumn("Rating"),
-            "grade": st.column_config.TextColumn("Grade"),
-            "year": st.column_config.TextColumn("Year"),
-        },
-        key="editable_data",
-    )
-    # Persist edits for preview/export
-    st.session_state["active_df"] = edited
-    active_df = st.session_state["active_df"]
-    st.caption("การแก้ไขในตารางนี้จะถูกใช้ทั้งพรีวิวและส่งออก PDF")
 with colR:
     st.subheader("🧩 Preset (.json) — รวม Body + Cover (cover ใช้แถว 0 เสมอ)")
 
@@ -598,4 +567,3 @@ if st.button("🚀 Export PDF"):
 
 st.markdown("---")
 st.caption("CSV: No, Student ID, Name, Semester 1, Semester 2, Total, Rating, Grade, Year • Preset รวม (data_row_index=0) • ใช้ PDF เท่านั้น • มีโหมดโหลดจาก GitHub อัตโนมัติ (Template + Preset) พร้อมบอกสถานะชัดเจน")
-
