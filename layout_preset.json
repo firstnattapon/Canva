@@ -14,17 +14,6 @@
         "align": "left"
       },
       {
-        "field_key": "name",
-        "label": "Name",
-        "active": true,
-        "x": 250.0,
-        "y": 226.0,
-        "font": "times",
-        "size": 12,
-        "transform": "none",
-        "align": "left"
-      },
-      {
         "field_key": "student_id",
         "label": "Student ID",
         "active": true,
@@ -36,13 +25,24 @@
         "align": "left"
       },
       {
+        "field_key": "name",
+        "label": "Name",
+        "active": true,
+        "x": 250.0,
+        "y": 226.0,
+        "font": "times",
+        "size": 12,
+        "transform": "none",
+        "align": "left"
+      },
+      {
         "field_key": "sem1",
         "label": "Semester 1",
         "active": true,
-        "x": 420.0,
-        "y": 160.0,
-        "font": "helv",
-        "size": 14,
+        "x": 236.0,
+        "y": 390.0,
+        "font": "times",
+        "size": 12,
         "transform": "none",
         "align": "left"
       },
@@ -60,7 +60,7 @@
       {
         "field_key": "total",
         "label": "Total",
-        "active": true,
+        "active": false,
         "x": 640.0,
         "y": 160.0,
         "font": "helv",
@@ -106,28 +106,6 @@
   "cover": {
     "fields": [
       {
-        "field_key": "no",
-        "label": "No",
-        "active": false,
-        "x": 140.0,
-        "y": 160.0,
-        "font": "helv",
-        "size": 14,
-        "transform": "title",
-        "align": "left"
-      },
-      {
-        "field_key": "name",
-        "label": "Name",
-        "active": false,
-        "x": 220.0,
-        "y": 260.0,
-        "font": "helv",
-        "size": 24,
-        "transform": "title",
-        "align": "left"
-      },
-      {
         "field_key": "student_id",
         "label": "Student ID",
         "active": false,
@@ -139,14 +117,14 @@
         "align": "left"
       },
       {
-        "field_key": "year",
-        "label": "Year",
-        "active": true,
+        "field_key": "name",
+        "label": "Name",
+        "active": false,
         "x": 220.0,
-        "y": 324.0,
+        "y": 260.0,
         "font": "helv",
-        "size": 14,
-        "transform": "none",
+        "size": 24,
+        "transform": "title",
         "align": "left"
       },
       {
@@ -202,6 +180,17 @@
         "font": "helv",
         "size": 16,
         "transform": "upper",
+        "align": "left"
+      },
+      {
+        "field_key": "year",
+        "label": "Year",
+        "active": true,
+        "x": 220.0,
+        "y": 324.0,
+        "font": "helv",
+        "size": 14,
+        "transform": "none",
         "align": "left"
       }
     ],
