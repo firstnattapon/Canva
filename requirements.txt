@@ -4,3 +4,4 @@ reportlab
 openpyxl
 pypdf 
 pillow
+fitz
