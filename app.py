@@ -10,10 +10,13 @@
 #   ✅ พรีวิวสด — ใช้ use_container_width
 #   ✅ CSV Auto-load จาก GitHub + แสดงสถานะ
 #   ✅ Preset Auto-load จาก GitHub + แสดงสถานะ
-# (moved all status panels to sidebar)
 #   ✅ Align ซ้าย/กลาง/ขวา ด้วยการวัดความกว้างข้อความแบบ compatible (ทุกเวอร์ชัน PyMuPDF)
 #   ✅ Auto-Sync: เปลี่ยน CSV → อัปเดต 1) 📚 ข้อมูล (preview)  2) ⚙️ Body Layout  3) ⚙️ Cover Layout
 #   ✅ FIX: ฟิลด์ "no" จะไม่โดนลบ/ข้ามจาก Layout อีกต่อไป
+#   ✅ ย้าย UI: รวมเป็น 2 Tabs
+#       - Tab#1: 🔎 พรีวิว + 📦 ส่งออก PDF ทั้งชุด
+#       - Tab#2: 📚 ข้อมูล (preview) + 🧩 Preset (.json)
+#   ✅ ย้ายสถานะ (Preset / เทมเพลต / CSV) → Sidebar
 #
 # Install deps:
 #   pip install streamlit pandas pillow pymupdf requests
@@ -208,7 +211,7 @@ def build_field_df(existing_cols: List[str], defaults) -> pd.DataFrame:
         rows.append({
             "field_key": k,
             "label": label,
-            # เปิดอัตโนมัติถ้าอยู่ใน CSV หรือเป็นคีย์สำคัญ (name/id/total)
+            # เปิดอัตโนมัติถ้าอยู่ใน CSV หรือเป็นคีย์สำคัญ (name/id/total/no)
             "active": active if k in existing or k in ["name", "student_id", "total", "no"] else False,
             "x": x, "y": y, "font": font, "size": size,
             "transform": transform, "align": align
@@ -271,6 +274,7 @@ def _measure_text_width(page, text: str, font: str, size: float) -> float:
         # 3) สำรองสุดท้ายแบบประมาณการ
         return 0.6 * size * max(len(text), 0)
 
+
 def _aligned_xy(page, text: str, x: float, y: float, font: str, size: float, align: str):
     """คืนค่า (x_adj, y) ตาม align โดยวัดความกว้างข้อความแบบ compatible ทุกเวอร์ชัน."""
     w = _measure_text_width(page, text, font, size)
@@ -279,6 +283,7 @@ def _aligned_xy(page, text: str, x: float, y: float, font: str, size: float, ali
     if align == "right":
         return x - w, y
     return x, y
+
 
 def render_preview_with_pymupdf(template_bytes: bytes, fields_df: pd.DataFrame,
                                 record: pd.Series, scale: float = 2.0):
@@ -316,6 +321,7 @@ def render_preview_with_pymupdf(template_bytes: bytes, fields_df: pd.DataFrame,
     return img
 
 # ---- NEW: auto-sync helpers ----
+
 def _defaults_to_rowmap(defaults):
     m = {}
     for k, label, active, x, y, font, size, transform, align in defaults:
@@ -325,6 +331,7 @@ def _defaults_to_rowmap(defaults):
             "transform": str(transform), "align": str(align)
         }
     return m
+
 
 def reconcile_fields(layout_df: pd.DataFrame, csv_cols: List[str], defaults) -> pd.DataFrame:
     """
@@ -341,7 +348,6 @@ def reconcile_fields(layout_df: pd.DataFrame, csv_cols: List[str], defaults) -> 
     dmap = _defaults_to_rowmap(defaults)
 
     rows = []
-    # เดิม: if c == "no": continue — ลบทิ้งเพื่อให้ 'no' อยู่เสมอ
     for c in csv_cols:
         if c in existing:
             rows.append(existing[c])
@@ -353,7 +359,6 @@ def reconcile_fields(layout_df: pd.DataFrame, csv_cols: List[str], defaults) -> 
             })
             rows.append(base)
 
-    # เดิม: if k not in csv_cols and k != "no": — ตัด != "no" ออก เพื่อคงแถว 'no' ไว้ด้วย
     for k, row in existing.items():
         if k not in csv_cols:
             row = {**row, "active": False}
@@ -372,8 +377,7 @@ if fitz is None:
     st.error("ต้องติดตั้ง PyMuPDF ก่อนใช้งาน: `pip install pymupdf`")
     st.stop()
 
-colL, colR = st.columns([1.2, 1.0], gap="large")
-
+# === Sidebar: Inputs ===
 with st.sidebar:
     st.header("📄 เทมเพลต — Body (PDF เท่านั้น)")
     tpl_pdf = st.file_uploader("Template PDF (Body)", type=["pdf"]) 
@@ -406,188 +410,110 @@ if csv_main is None:
     if default_csv_bytes is None:
         csv_source = "missing"
 
-# Visible status for template sources
-st.subheader("🔔 สถานะเทมเพลต (Body/Cover)")
-c1, c2 = st.columns(2)
-with c1:
-    if body_source == "uploaded":
-        st.success("Body Template: ใช้ไฟล์ที่อัปโหลด")
-    elif body_source == "github":
-        st.info(f"Body Template: โหลดจาก GitHub อัตโนมัติ\\n{to_raw_github(DEFAULT_BODY_URL)}")
-    else:
-        st.error("Body Template: ไม่พบทั้งไฟล์อัปโหลดและค่าเริ่มต้นจาก GitHub")
-with c2:
-    if not cover_active:
-        st.warning("Cover Template: ปิดการใช้งานปก (จะไม่มีหน้าแรก)")
-    else:
-        if cover_source == "uploaded":
-            st.success("Cover Template: ใช้ไฟล์ที่อัปโหลด")
-        elif cover_source == "github":
-            st.info(f"Cover Template: โหลดจาก GitHub อัตโนมัติ\\n{to_raw_github(DEFAULT_COVER_URL)}")
-        else:
-            st.error("Cover Template: ไม่พบทั้งไฟล์อัปโหลดและค่าเริ่มต้นจาก GitHub")
-
-# CSV status
-st.subheader("🔔 สถานะข้อมูล (CSV)")
-if csv_source == "uploaded":
-    st.success("CSV: ใช้ไฟล์ที่อัปโหลด")
-elif csv_source == "github":
-    st.info(f"CSV: โหลดจาก GitHub อัตโนมัติ\\n{to_raw_github(DEFAULT_CSV_URL)}")
+# === Load Data & Initialize State ===
+if csv_main is not None:
+    df = canonicalize_columns(try_read_table(csv_main))
 else:
-    st.error("CSV: ไม่พบทั้งไฟล์อัปโหลดและค่าเริ่มต้นจาก GitHub")
-
-with colL:
-    # Load data — single CSV (uploaded or default GitHub)
-    if csv_main is not None:
-        df = canonicalize_columns(try_read_table(csv_main))
+    if default_csv_bytes is not None:
+        df = canonicalize_columns(read_csv_bytes(default_csv_bytes))
     else:
-        if default_csv_bytes is not None:
-            df = canonicalize_columns(read_csv_bytes(default_csv_bytes))
-        else:
-            st.warning("อัปโหลด CSV ตามสคีมาใหม่ก่อน หรือระบบโหลดจาก GitHub ไม่สำเร็จ")
-            st.stop()
-
-    if df.empty:
-        st.warning("CSV ว่างเปล่า")
+        st.warning("อัปโหลด CSV ตามสคีมาใหม่ก่อน หรือระบบโหลดจาก GitHub ไม่สำเร็จ")
         st.stop()
 
-    # Ensure important columns exist
-    for c in ["no", "student_id", "name", "sem1", "sem2", "total", "rating", "grade", "year"]:
-        if c not in df.columns:
-            df[c] = ""
+if df.empty:
+    st.warning("CSV ว่างเปล่า")
+    st.stop()
 
-    # Order columns nicely
-    pref = ["no", "student_id", "name", "sem1", "sem2", "total", "rating", "grade", "year"]
-    ordered = [c for c in pref if c in df.columns] + [c for c in df.columns if c not in pref]
-    active_df = df[ordered]
+# Ensure important columns exist
+for c in ["no", "student_id", "name", "sem1", "sem2", "total", "rating", "grade", "year"]:
+    if c not in df.columns:
+        df[c] = ""
 
-    # ---- NEW: remember CSV signature & auto-sync layouts ----
-    st.session_state["current_csv_cols"] = ordered
-    csv_sig = tuple(ordered)
-    prev_sig = st.session_state.get("csv_signature")
+# Order columns nicely
+pref = ["no", "student_id", "name", "sem1", "sem2", "total", "rating", "grade", "year"]
+ordered = [c for c in pref if c in df.columns] + [c for c in df.columns if c not in pref]
+active_df = df[ordered]
 
-    if prev_sig != csv_sig:
-        if "fields_df" in st.session_state:
-            st.session_state["fields_df"] = reconcile_fields(
-                st.session_state["fields_df"], ordered, DEFAULT_FIELDS
-            )
+# Remember CSV signature & auto-sync layouts
+st.session_state["current_csv_cols"] = ordered
+csv_sig = tuple(ordered)
+prev_sig = st.session_state.get("csv_signature")
+
+# Ensure field DFs exist
+if "fields_df" not in st.session_state:
+    st.session_state["fields_df"] = build_field_df(ordered, DEFAULT_FIELDS)
+if "cover_fields_df" not in st.session_state:
+    st.session_state["cover_fields_df"] = build_field_df(ordered, DEFAULT_COVER_FIELDS)
+if "preset_loaded" not in st.session_state:
+    st.session_state["preset_loaded"] = False
+if "preset_url_used" not in st.session_state:
+    st.session_state["preset_url_used"] = ""
+
+# Auto-sync on CSV change
+if prev_sig != csv_sig:
+    st.session_state["fields_df"] = reconcile_fields(
+        st.session_state["fields_df"], ordered, DEFAULT_FIELDS
+    )
+    st.session_state["cover_fields_df"] = reconcile_fields(
+        st.session_state["cover_fields_df"], ordered, DEFAULT_COVER_FIELDS
+    )
+    st.session_state["csv_signature"] = csv_sig
+    st.toast("ซิงค์ Layout กับ CSV แล้ว (อัตโนมัติ)", icon="🔄")
+
+# Preset helper for reuse
+
+def _apply_unified_preset_bytes(preset_bytes: bytes, source_label: str):
+    try:
+        raw = json.loads(preset_bytes.decode("utf-8"))
+        # Back-compat: list/fields => Body only
+        if isinstance(raw, list) or "fields" in raw:
+            fields_list = raw.get("fields", raw if isinstance(raw, list) else [])
+            new_df = pd.DataFrame(fields_list)
+            req = ["field_key", "label", "active", "x", "y", "font", "size", "transform", "align"]
+            missing = [c for c in req if c not in new_df.columns]
+            if missing:
+                st.error(f"Preset JSON ขาดคีย์: {missing}")
+                return
+            st.session_state["fields_df"] = new_df[req]
+            # reconcile with current CSV
+            csv_cols = st.session_state.get("current_csv_cols")
+            if csv_cols:
+                st.session_state["fields_df"] = reconcile_fields(
+                    st.session_state["fields_df"], csv_cols, DEFAULT_FIELDS
+                )
+            st.session_state["preset_loaded"] = True
+            st.session_state["preset_url_used"] = source_label
+            st.info("โหลดเฉพาะ Body (legacy) จาก Preset แล้ว")
         else:
-            st.session_state["fields_df"] = build_field_df(ordered, DEFAULT_FIELDS)
+            body = raw.get("body", {})
+            cover = raw.get("cover", {})
+            if "fields" in body:
+                st.session_state["fields_df"] = pd.DataFrame(body["fields"])
+            if "fields" in cover:
+                st.session_state["cover_fields_df"] = pd.DataFrame(cover["fields"])
+            csv_cols = st.session_state.get("current_csv_cols")
+            if csv_cols:
+                st.session_state["fields_df"] = reconcile_fields(
+                    st.session_state["fields_df"], csv_cols, DEFAULT_FIELDS
+                )
+                st.session_state["cover_fields_df"] = reconcile_fields(
+                    st.session_state["cover_fields_df"], csv_cols, DEFAULT_COVER_FIELDS
+                )
+            st.session_state["preset_loaded"] = True
+            st.session_state["preset_url_used"] = source_label
+            st.success("นำเข้า Preset (Body + Cover) สำเร็จ")
+    except Exception as e:
+        st.error(f"อ่านไฟล์/URL Preset ไม่ได้: {e}")
 
-        if "cover_fields_df" in st.session_state:
-            st.session_state["cover_fields_df"] = reconcile_fields(
-                st.session_state["cover_fields_df"], ordered, DEFAULT_COVER_FIELDS
-            )
-        else:
-            st.session_state["cover_fields_df"] = build_field_df(ordered, DEFAULT_COVER_FIELDS)
+# Auto-load preset once if not loaded
+if not st.session_state["preset_loaded"]:
+    auto_b = fetch_default_json(DEFAULT_PRESET_URL)
+    if auto_b:
+        _apply_unified_preset_bytes(auto_b, to_raw_github(DEFAULT_PRESET_URL))
 
-        st.session_state["csv_signature"] = csv_sig
-        st.toast("ซิงค์ Layout กับ CSV แล้ว (อัตโนมัติ)", icon="🔄")
-
-    st.subheader("📚 ข้อมูล (preview)")
-    st.dataframe(active_df.head(12), use_container_width=True)
-
-with colR:
-    st.subheader("🧩 Preset (.json)")
-
-    # Init session states (หลัง active_df พร้อมแล้ว)
-    if "fields_df" not in st.session_state:
-        st.session_state["fields_df"] = build_field_df(active_df.columns.tolist(), DEFAULT_FIELDS)
-    if "cover_fields_df" not in st.session_state:
-        st.session_state["cover_fields_df"] = build_field_df(active_df.columns.tolist(), DEFAULT_COVER_FIELDS)
-    if "preset_loaded" not in st.session_state:
-        st.session_state["preset_loaded"] = False
-    if "preset_url_used" not in st.session_state:
-        st.session_state["preset_url_used"] = ""
-
-    with st.expander("Import / Export", expanded=False):
-        col_i, col_e = st.columns(2)
-        with col_i:
-            preset_json = st.file_uploader("นำเข้า Preset (.json)", type=["json"], key="unified_preset_upload")
-            preset_url = st.text_input("หรือระบุ URL (GitHub/Raw) สำหรับ Preset", value=DEFAULT_PRESET_URL)
-            load_from_url = st.button("⬇️ โหลด Preset จาก URL")
-
-            def _apply_unified_preset_bytes(preset_bytes: bytes, source_label: str):
-                try:
-                    raw = json.loads(preset_bytes.decode("utf-8"))
-                    # Back-compat: list/fields => Body only
-                    if isinstance(raw, list) or "fields" in raw:
-                        fields_list = raw.get("fields", raw if isinstance(raw, list) else [])
-                        new_df = pd.DataFrame(fields_list)
-                        req = ["field_key", "label", "active", "x", "y", "font", "size", "transform", "align"]
-                        missing = [c for c in req if c not in new_df.columns]
-                        if missing:
-                            st.error(f"Preset JSON ขาดคีย์: {missing}")
-                            return
-                        st.session_state["fields_df"] = new_df[req]
-                        # ---- NEW: reconcile with current CSV ----
-                        csv_cols = st.session_state.get("current_csv_cols")
-                        if csv_cols:
-                            st.session_state["fields_df"] = reconcile_fields(
-                                st.session_state["fields_df"], csv_cols, DEFAULT_FIELDS
-                            )
-                        st.session_state["preset_loaded"] = True
-                        st.session_state["preset_url_used"] = source_label
-                        st.info("โหลดเฉพาะ Body (legacy) จาก Preset แล้ว")
-                    else:
-                        body = raw.get("body", {})
-                        cover = raw.get("cover", {})
-                        if "fields" in body:
-                            st.session_state["fields_df"] = pd.DataFrame(body["fields"])
-                        if "fields" in cover:
-                            st.session_state["cover_fields_df"] = pd.DataFrame(cover["fields"])
-                        # ---- NEW: reconcile with current CSV ----
-                        csv_cols = st.session_state.get("current_csv_cols")
-                        if csv_cols:
-                            st.session_state["fields_df"] = reconcile_fields(
-                                st.session_state["fields_df"], csv_cols, DEFAULT_FIELDS
-                            )
-                            st.session_state["cover_fields_df"] = reconcile_fields(
-                                st.session_state["cover_fields_df"], csv_cols, DEFAULT_COVER_FIELDS
-                            )
-                        # data_row_index ถูกบังคับเป็น 0 เสมอ
-                        st.session_state["preset_loaded"] = True
-                        st.session_state["preset_url_used"] = source_label
-                        st.success("นำเข้า Preset (Body + Cover) สำเร็จ")
-                except Exception as e:
-                    st.error(f"อ่านไฟล์/URL Preset ไม่ได้: {e}")
-
-            preset_source = "unknown"
-            if preset_json is not None:
-                _apply_unified_preset_bytes(preset_json.read(), "uploaded")
-                preset_source = "uploaded"
-
-            if load_from_url:
-                b = fetch_default_json(preset_url)
-                if b:
-                    _apply_unified_preset_bytes(b, to_raw_github(preset_url))
-                    preset_source = "github"
-
-            # Auto-load from DEFAULT_PRESET_URL once if nothing uploaded yet
-            if not st.session_state["preset_loaded"] and preset_json is None and not load_from_url:
-                auto_b = fetch_default_json(DEFAULT_PRESET_URL)
-                if auto_b:
-                    _apply_unified_preset_bytes(auto_b, to_raw_github(DEFAULT_PRESET_URL))
-                    st.info(f"Preset: โหลดจาก GitHub อัตโนมัติ\n{to_raw_github(DEFAULT_PRESET_URL)}")
-                    preset_source = "github"
-
-        with col_e:
-            try:
-                payload = {
-                    "version": 10,
-                    "body": {"fields": st.session_state["fields_df"].to_dict(orient="records")},
-                    "cover": {
-                        "fields": st.session_state["cover_fields_df"].to_dict(orient="records"),
-                        "data_row_index": 0,  # always zero by design
-                    },
-                }
-                buf = io.StringIO(); json.dump(payload, buf, ensure_ascii=False, indent=2)
-                st.download_button("⬇️ Export Preset (.json)", data=buf.getvalue().encode("utf-8"),
-                                   file_name="layout_preset_body_cover.json", mime="application/json")
-            except Exception as e:
-                st.error(f"Export JSON ผิดพลาด: {e}")
-
-    # ✅ แสดงสถานะ Preset เหมือน Body/Cover/CSV
+# === Sidebar: Status panels ===
+with st.sidebar:
+    st.markdown("---")
     st.subheader("🔔 สถานะ Preset (.json)")
     if st.session_state.get("preset_loaded", False):
         src = st.session_state.get("preset_url_used") or "uploaded"
@@ -598,7 +524,181 @@ with colR:
     else:
         st.warning("Preset: ยังไม่พบ (ระบบพยายามโหลดอัตโนมัติจาก GitHub)")
 
-    # (ออปชัน) ปุ่ม Resync เอง
+    st.subheader("🔔 สถานะเทมเพลต (Body/Cover)")
+    if body_source == "uploaded":
+        st.success("Body Template: ใช้ไฟล์ที่อัปโหลด")
+    elif body_source == "github":
+        st.info(f"Body Template: โหลดจาก GitHub อัตโนมัติ\n{to_raw_github(DEFAULT_BODY_URL)}")
+    else:
+        st.error("Body Template: ไม่พบทั้งไฟล์อัปโหลดและค่าเริ่มต้นจาก GitHub")
+
+    if not cover_active:
+        st.warning("Cover Template: ปิดการใช้งานปก (จะไม่มีหน้าแรก)")
+    else:
+        if cover_source == "uploaded":
+            st.success("Cover Template: ใช้ไฟล์ที่อัปโหลด")
+        elif cover_source == "github":
+            st.info(f"Cover Template: โหลดจาก GitHub อัตโนมัติ\n{to_raw_github(DEFAULT_COVER_URL)}")
+        else:
+            st.error("Cover Template: ไม่พบทั้งไฟล์อัปโหลดและค่าเริ่มต้นจาก GitHub")
+
+    st.subheader("🔔 สถานะข้อมูล (CSV)")
+    if csv_source == "uploaded":
+        st.success("CSV: ใช้ไฟล์ที่อัปโหลด")
+    elif csv_source == "github":
+        st.info(f"CSV: โหลดจาก GitHub อัตโนมัติ\n{to_raw_github(DEFAULT_CSV_URL)}")
+    else:
+        st.error("CSV: ไม่พบทั้งไฟล์อัปโหลดและค่าเริ่มต้นจาก GitHub")
+
+# ============ MAIN TABS (Goal_1) ============
+tab1, tab2 = st.tabs([
+    "🔎 พรีวิว + 📦 ส่งออก PDF ทั้งชุด",
+    "📚 ข้อมูล (preview) + 🧩 Preset (.json)",
+])
+
+# ---- Tab 1: Preview + Export ----
+with tab1:
+    st.subheader("🔎 พรีวิว")
+    idx_options = list(range(len(active_df)))
+    if len(idx_options) == 0:
+        st.stop()
+
+    rec_idx = st.number_input("แถวที่ต้องการพรีวิว (Body)", min_value=0, max_value=len(idx_options)-1, value=0, step=1)
+    record_body = active_df.iloc[int(rec_idx)]
+
+    # Cover record = row 0 ALWAYS
+    cov_idx = 0
+    record_cover = active_df.iloc[cov_idx]
+
+    page_type = st.radio("หน้าไหน", ["Body", "Cover"], index=0, horizontal=True)
+
+    def _draw_fields_on_page(page, fields_df: pd.DataFrame, record: pd.Series):
+        for _, row in fields_df.iterrows():
+            if not row["active"]:
+                continue
+            key = row["field_key"]
+            if key not in record or pd.isna(record[key]):
+                continue
+            text = apply_transform(record[key], row["transform"])
+            x, y = float(row["x"]), float(row["y"])
+            font = row.get("font", "helv")
+            size = float(row.get("size", 12))
+            align = row.get("align", "left")
+            ax, ay = _aligned_xy(page, str(text), x, y, font, size, align)
+            try:
+                page.insert_text((ax, ay), str(text), fontname=font if font in STD_FONTS else "helv",
+                                 fontsize=size, color=(0,0,0))
+            except Exception:
+                page.insert_text((ax, ay), str(text), fontname="helv", fontsize=size, color=(0,0,0))
+
+    try:
+        if page_type == "Body":
+            body_src = tpl_pdf.getvalue() if tpl_pdf is not None else default_body_bytes
+            if body_src is not None:
+                st.image(
+                    render_preview_with_pymupdf(body_src, st.session_state["fields_df"], record_body, 2.0),
+                    caption=f"Body — {get_record_display(record_body)}",
+                    use_container_width=True,
+                )
+                if body_source == "github" and tpl_pdf is None:
+                    st.caption(f"กำลังใช้ Body จาก GitHub: {to_raw_github(DEFAULT_BODY_URL)}")
+                st.caption("Body: หน่วย X/Y = จุด (pt) — มุมซ้ายบนคือ (0,0)")
+            else:
+                st.info("อัปโหลด Template PDF ของ Body หรือให้ระบบโหลดค่าเริ่มต้นจาก GitHub (ตรวจสอบเครือข่าย)")
+        else:  # Cover
+            if cover_active:
+                cover_src = tpl_cover_pdf.getvalue() if tpl_cover_pdf is not None else default_cover_bytes
+                if cover_src is not None:
+                    st.image(
+                        render_preview_with_pymupdf(cover_src, st.session_state["cover_fields_df"], record_cover, 2.0),
+                        caption=f"Cover — ใช้ข้อมูลแถวที่ 0 (แถวแรก) — {get_record_display(record_cover)}",
+                        use_container_width=True,
+                    )
+                    if cover_source == "github" and tpl_cover_pdf is None:
+                        st.caption(f"กำลังใช้ Cover จาก GitHub: {to_raw_github(DEFAULT_COVER_URL)}")
+                    st.caption("Cover: หน่วย X/Y = จุด (pt) — มุมซ้ายบนคือ (0,0) • ใช้ข้อมูลจากแถวที่ 0 เสมอ")
+                else:
+                    st.info("เปิด Active ปก แล้ว—อัปโหลด Cover Template PDF หรือให้ระบบโหลดค่าเริ่มต้นจาก GitHub (ตรวจสอบเครือข่าย)")
+            else:
+                st.info("ยังไม่ได้เปิด Active ปก (หน้าแรกครั้งเดียว)")
+    except Exception as e:
+        st.error(f"พรีวิวผิดพลาด: {e}")
+
+    st.divider()
+    st.subheader("📦 ส่งออก PDF ทั้งชุด (ปกหน้าแรก 1 ครั้ง + Body 1 หน้า/คน)")
+
+    if st.button("🚀 Export PDF"):
+        try:
+            body_src = tpl_pdf.getvalue() if tpl_pdf is not None else default_body_bytes
+            if body_src is None:
+                st.error("ไม่มี Template PDF ของ Body (อัปโหลดหรือให้ระบบโหลดค่าเริ่มต้นจาก GitHub)")
+            else:
+                out = fitz.open()
+
+                # Insert global cover once using row 0
+                if cover_active:
+                    cover_src = tpl_cover_pdf.getvalue() if tpl_cover_pdf is not None else default_cover_bytes
+                    if cover_src is not None:
+                        t_cover = fitz.open(stream=cover_src, filetype="pdf")
+                        out.insert_pdf(t_cover, from_page=0, to_page=0)
+                        page0 = out[-1]
+                        _draw_fields_on_page(page0, st.session_state["cover_fields_df"], record_cover)
+                        t_cover.close()
+                    else:
+                        st.warning("ไม่พบ Cover Template — จะข้ามหน้า Cover")
+
+                # Insert body pages per student
+                for _, rec in active_df.iterrows():
+                    t_body = fitz.open(stream=body_src, filetype="pdf")
+                    out.insert_pdf(t_body, from_page=0, to_page=0)
+                    page = out[-1]
+                    _draw_fields_on_page(page, st.session_state["fields_df"], rec)
+                    t_body.close()
+
+                pdf_bytes = out.tobytes(); out.close()
+                total_pages = len(active_df) + (1 if (cover_active and (tpl_cover_pdf is not None or default_cover_bytes is not None)) else 0)
+                st.success(f"เสร็จแล้ว: {total_pages} หน้า (ปก 1 + เนื้อหา {len(active_df)})")
+                st.download_button("⬇️ ดาวน์โหลด PDF", data=pdf_bytes,
+                                   file_name="exported_batch_with_global_cover.pdf", mime="application/pdf")
+        except Exception as e:
+            st.error(f"ส่งออกไม่สำเร็จ: {e}")
+
+# ---- Tab 2: Data preview + Preset UI ----
+with tab2:
+    st.subheader("📚 ข้อมูล (preview)")
+    st.dataframe(active_df.head(12), use_container_width=True)
+
+    st.subheader("🧩 Preset (.json)")
+    with st.expander("Import / Export", expanded=False):
+        col_i, col_e = st.columns(2)
+        with col_i:
+            preset_json = st.file_uploader("นำเข้า Preset (.json)", type=["json"], key="unified_preset_upload")
+            preset_url = st.text_input("หรือระบุ URL (GitHub/Raw) สำหรับ Preset", value=DEFAULT_PRESET_URL)
+            load_from_url = st.button("⬇️ โหลด Preset จาก URL")
+
+            if preset_json is not None:
+                _apply_unified_preset_bytes(preset_json.read(), "uploaded")
+            if load_from_url:
+                b = fetch_default_json(preset_url)
+                if b:
+                    _apply_unified_preset_bytes(b, to_raw_github(preset_url))
+
+        with col_e:
+            try:
+                payload = {
+                    "version": 10,
+                    "body": {"fields": st.session_state["fields_df"].to_dict(orient="records")},
+                    "cover": {
+                        "fields": st.session_state["cover_fields_df"].to_dict(orient="records"),
+                        "data_row_index": 0,
+                    },
+                }
+                buf = io.StringIO(); json.dump(payload, buf, ensure_ascii=False, indent=2)
+                st.download_button("⬇️ Export Preset (.json)", data=buf.getvalue().encode("utf-8"),
+                                   file_name="layout_preset_body_cover.json", mime="application/json")
+            except Exception as e:
+                st.error(f"Export JSON ผิดพลาด: {e}")
+
     with st.expander("🔁 Sync Layout กับ CSV (กดเองถ้าจำเป็น)", expanded=False):
         if st.button("Resync now"):
             cols = st.session_state.get("current_csv_cols", active_df.columns.tolist())
@@ -606,9 +706,7 @@ with colR:
             st.session_state["cover_fields_df"] = reconcile_fields(st.session_state["cover_fields_df"], cols, DEFAULT_COVER_FIELDS)
             st.toast("Resynced!", icon="✅")
 
-    # Tabs for editing
     tab_body, tab_cover = st.tabs(["⚙️ Body Layout", "⚙️ Cover Layout"])
-
     with tab_body:
         edited_body = st.data_editor(
             st.session_state["fields_df"],
@@ -646,112 +744,6 @@ with colR:
             key="fields_editor_cover",
         )
         st.session_state["cover_fields_df"] = edited_cover
-
-# -------- Preview --------
-st.subheader("🔎 พรีวิว")
-idx_options = list(range(len(active_df)))
-if len(idx_options) == 0:
-    st.stop()
-
-rec_idx = st.number_input("แถวที่ต้องการพรีวิว (Body)", min_value=0, max_value=len(idx_options)-1, value=0, step=1)
-record_body = active_df.iloc[int(rec_idx)]
-
-# Cover record = row 0 ALWAYS
-cov_idx = 0
-record_cover = active_df.iloc[cov_idx]
-
-page_type = st.radio("หน้าไหน", ["Body", "Cover"], index=0, horizontal=True)
-
-def _draw_fields_on_page(page, fields_df: pd.DataFrame, record: pd.Series):
-    for _, row in fields_df.iterrows():
-        if not row["active"]:
-            continue
-        key = row["field_key"]
-        if key not in record or pd.isna(record[key]):
-            continue
-        text = apply_transform(record[key], row["transform"])
-        x, y = float(row["x"]), float(row["y"])
-        font = row.get("font", "helv")
-        size = float(row.get("size", 12))
-        align = row.get("align", "left")
-        ax, ay = _aligned_xy(page, str(text), x, y, font, size, align)
-        try:
-            page.insert_text((ax, ay), str(text), fontname=font if font in STD_FONTS else "helv",
-                             fontsize=size, color=(0,0,0))
-        except Exception:
-            page.insert_text((ax, ay), str(text), fontname="helv", fontsize=size, color=(0,0,0))
-
-try:
-    if page_type == "Body":
-        body_src = tpl_pdf.getvalue() if tpl_pdf is not None else default_body_bytes
-        if body_src is not None:
-            st.image(
-                render_preview_with_pymupdf(body_src, st.session_state["fields_df"], record_body, 2.0),
-                caption=f"Body — {get_record_display(record_body)}",
-                use_container_width=True,
-            )
-            if body_source == "github" and tpl_pdf is None:
-                st.caption(f"กำลังใช้ Body จาก GitHub: {to_raw_github(DEFAULT_BODY_URL)}")
-            st.caption("Body: หน่วย X/Y = จุด (pt) — มุมซ้ายบนคือ (0,0)")
-        else:
-            st.info("อัปโหลด Template PDF ของ Body หรือให้ระบบโหลดค่าเริ่มต้นจาก GitHub (ตรวจสอบเครือข่าย)")
-    else:  # Cover
-        if cover_active:
-            cover_src = tpl_cover_pdf.getvalue() if tpl_cover_pdf is not None else default_cover_bytes
-            if cover_src is not None:
-                st.image(
-                    render_preview_with_pymupdf(cover_src, st.session_state["cover_fields_df"], record_cover, 2.0),
-                    caption=f"Cover — ใช้ข้อมูลแถวที่ 0 (แถวแรก) — {get_record_display(record_cover)}",
-                    use_container_width=True,
-                )
-                if cover_source == "github" and tpl_cover_pdf is None:
-                    st.caption(f"กำลังใช้ Cover จาก GitHub: {to_raw_github(DEFAULT_COVER_URL)}")
-                st.caption("Cover: หน่วย X/Y = จุด (pt) — มุมซ้ายบนคือ (0,0) • ใช้ข้อมูลจากแถวที่ 0 เสมอ")
-            else:
-                st.info("เปิด Active ปก แล้ว—อัปโหลด Cover Template PDF หรือให้ระบบโหลดค่าเริ่มต้นจาก GitHub (ตรวจสอบเครือข่าย)")
-        else:
-            st.info("ยังไม่ได้เปิด Active ปก (หน้าแรกครั้งเดียว)")
-except Exception as e:
-    st.error(f"พรีวิวผิดพลาด: {e}")
-
-st.divider()
-st.subheader("📦 ส่งออก PDF ทั้งชุด (ปกหน้าแรก 1 ครั้ง + Body 1 หน้า/คน)")
-
-if st.button("🚀 Export PDF"):
-    try:
-        body_src = tpl_pdf.getvalue() if tpl_pdf is not None else default_body_bytes
-        if body_src is None:
-            st.error("ไม่มี Template PDF ของ Body (อัปโหลดหรือให้ระบบโหลดค่าเริ่มต้นจาก GitHub)")
-        else:
-            out = fitz.open()
-
-            # Insert global cover once using row 0
-            if cover_active:
-                cover_src = tpl_cover_pdf.getvalue() if tpl_cover_pdf is not None else default_cover_bytes
-                if cover_src is not None:
-                    t_cover = fitz.open(stream=cover_src, filetype="pdf")
-                    out.insert_pdf(t_cover, from_page=0, to_page=0)
-                    page0 = out[-1]
-                    _draw_fields_on_page(page0, st.session_state["cover_fields_df"], record_cover)
-                    t_cover.close()
-                else:
-                    st.warning("ไม่พบ Cover Template — จะข้ามหน้า Cover")
-
-            # Insert body pages per student
-            for _, rec in active_df.iterrows():
-                t_body = fitz.open(stream=body_src, filetype="pdf")
-                out.insert_pdf(t_body, from_page=0, to_page=0)
-                page = out[-1]
-                _draw_fields_on_page(page, st.session_state["fields_df"], rec)
-                t_body.close()
-
-            pdf_bytes = out.tobytes(); out.close()
-            total_pages = len(active_df) + (1 if (cover_active and (tpl_cover_pdf is not None or default_cover_bytes is not None)) else 0)
-            st.success(f"เสร็จแล้ว: {total_pages} หน้า (ปก 1 + เนื้อหา {len(active_df)})")
-            st.download_button("⬇️ ดาวน์โหลด PDF", data=pdf_bytes,
-                               file_name="exported_batch_with_global_cover.pdf", mime="application/pdf")
-    except Exception as e:
-        st.error(f"ส่งออกไม่สำเร็จ: {e}")
 
 st.markdown("---")
 st.caption(
