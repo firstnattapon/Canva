@@ -14,22 +14,22 @@
         "align": "left"
       },
       {
-        "field_key": "name",
-        "label": "Name",
+        "field_key": "student_id",
+        "label": "Student ID",
         "active": true,
-        "x": 266.0,
-        "y": 227.0,
+        "x": 308.0,
+        "y": 209.0,
         "font": "times",
         "size": 12,
         "transform": "none",
         "align": "left"
       },
       {
-        "field_key": "student_id",
-        "label": "Student ID",
+        "field_key": "name",
+        "label": "Name",
         "active": true,
-        "x": 308.0,
-        "y": 209.0,
+        "x": 266.0,
+        "y": 227.0,
         "font": "times",
         "size": 12,
         "transform": "none",
@@ -117,17 +117,6 @@
         "align": "left"
       },
       {
-        "field_key": "name",
-        "label": "Name",
-        "active": false,
-        "x": 220.0,
-        "y": 260.0,
-        "font": "helv",
-        "size": 24,
-        "transform": "title",
-        "align": "left"
-      },
-      {
         "field_key": "student_id",
         "label": "Student ID",
         "active": false,
@@ -139,14 +128,14 @@
         "align": "left"
       },
       {
-        "field_key": "year",
-        "label": "Year",
-        "active": true,
-        "x": 384.0,
-        "y": 436.0,
-        "font": "times",
-        "size": 16,
-        "transform": "none",
+        "field_key": "name",
+        "label": "Name",
+        "active": false,
+        "x": 220.0,
+        "y": 260.0,
+        "font": "helv",
+        "size": 24,
+        "transform": "title",
         "align": "left"
       },
       {
@@ -198,7 +187,18 @@
         "label": "Grade",
         "active": true,
         "x": 309.0,
-        "y": 407.0,
+        "y": 412.0,
+        "font": "times",
+        "size": 16,
+        "transform": "none",
+        "align": "left"
+      },
+      {
+        "field_key": "year",
+        "label": "Year",
+        "active": true,
+        "x": 384.0,
+        "y": 436.0,
         "font": "times",
         "size": 16,
         "transform": "none",
